@@ -5,10 +5,22 @@ export PATH=/usr/local/bin:$PATH
 cd /www/wwwroot/sk-buy
 
 echo "===== $(date '+%F %T') deploy start ====="
+OLD=$(git rev-parse HEAD)
 git fetch origin main
 git reset --hard origin/main
 
-npm ci --no-audit --no-fund
+# 仅当 package-lock.json 变化时才重装依赖（避免小内存机器 OOM、缩短部署时间）
+# 若 node_modules 损坏（vite 不存在）则强制重装
+if [ ! -x node_modules/.bin/vite ]; then
+  echo "node_modules broken, running npm ci"
+  npm ci --no-audit --no-fund || { echo "npm ci failed, retry after cache clean"; npm cache clean --force; npm ci --no-audit --no-fund; }
+elif [ "$OLD" != "$(git rev-parse HEAD)" ] && git diff --name-only "$OLD" HEAD | grep -q '^package-lock.json$'; then
+  echo "lockfile changed, running npm ci"
+  npm ci --no-audit --no-fund || { echo "npm ci failed, retry after cache clean"; npm cache clean --force; npm ci --no-audit --no-fund; }
+else
+  echo "skip npm ci (lockfile unchanged)"
+fi
+
 npm run build
 
 # 幂等结构迁移（新增字段等）
