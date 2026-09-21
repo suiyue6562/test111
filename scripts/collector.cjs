@@ -15,6 +15,8 @@ const mysql = require("mysql2/promise");
 
 const INTERVAL_MIN = parseInt(process.env.PROBE_INTERVAL_MINUTES || "60", 10);
 const TIMEOUT_MS = parseInt(process.env.PROBE_TIMEOUT_MS || "10000", 10);
+const PRICE_INTERVAL_HOURS = parseFloat(process.env.PRICE_INTERVAL_HOURS || "24");
+const USD_CNY = parseFloat(process.env.USD_CNY_RATE || "7.2");
 
 function pad(n) { return String(n).padStart(2, "0"); }
 function todayStr() {
@@ -153,10 +155,173 @@ async function recomputeScores(pool) {
   console.log(`[collector] 评分已重算（${plats.length} 个平台）`);
 }
 
+/* ---------------- 价格自动采集（one-api / new-api 公共接口） ---------------- */
+
+const VENDOR_RULES = [
+  [/^(gpt|o\d|chatgpt|openai)/i, "OpenAI"],
+  [/^claude/i, "Claude"],
+  [/^gemini/i, "Gemini"],
+  [/^deepseek/i, "DeepSeek"],
+  [/^(qwen|qwq|通义)/i, "Qwen"],
+  [/^(kimi|moonshot)/i, "Kimi"],
+  [/^(glm|chatglm|智谱)/i, "GLM"],
+  [/^(minimax|abab)/i, "MiniMax"],
+  [/^(grok|xai)/i, "xAI"],
+];
+
+function vendorOf(model) {
+  for (const [re, v] of VENDOR_RULES) if (re.test(model)) return v;
+  return "其他";
+}
+
+async function fetchJson(url, timeoutMs = 8000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; SKBuyBot/1.0)" },
+    });
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("json")) return null;
+    return await res.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function parseMaybeJson(v) {
+  if (v == null) return {};
+  if (typeof v === "object") return v;
+  try { return JSON.parse(v); } catch { return {}; }
+}
+
+/** 估算单次调用人民币花费：one-api 中 model_ratio=1 对应 $0.002/1K 输入 tokens */
+function estimateCosts(modelRatio, completionRatio, groupRatio) {
+  const per1kIn = 0.002 * modelRatio; // $ / 1K input tokens
+  const cr = completionRatio > 0 ? completionRatio : 3;
+  const short$ = per1kIn * (2 + 0.5 * cr); // 2K 输入 + 0.5K 输出
+  const long$ = per1kIn * (8 + 2 * cr);    // 8K 输入 + 2K 输出
+  return {
+    shortCost: (short$ * USD_CNY * groupRatio).toFixed(4),
+    longCost: (long$ * USD_CNY * groupRatio).toFixed(4),
+  };
+}
+
+/** 从单个站点采集价格，返回 [{vendor, model, ratio, shortCost, longCost}] */
+async function fetchPlatformPrices(platform) {
+  const root = (platform.url || "").replace(/\/+$/, "");
+  if (!root) return null;
+
+  // 1) new-api：/api/pricing
+  const pj = await fetchJson(`${root}/api/pricing`);
+  if (pj && pj.success && Array.isArray(pj.data) && pj.data.length > 0) {
+    const groupRatio = Number(parseMaybeJson(pj.group_ratio).default) || 1;
+    const items = [];
+    for (const m of pj.data) {
+      const model = m.model_name || m.model;
+      if (!model) continue;
+      if (m.quota_type === 1 && Number(m.model_price) > 0) {
+        // 按次计费：model_price 为 quota（$1 = 500000 quota）
+        const cost = ((Number(m.model_price) / 500000) * USD_CNY * groupRatio).toFixed(4);
+        items.push({ vendor: vendorOf(model), model, ratio: "0", shortCost: cost, longCost: cost });
+      } else {
+        const mr = Number(m.model_ratio);
+        if (!(mr > 0 && mr < 10000)) continue;
+        const eff = mr * groupRatio;
+        const costs = estimateCosts(mr, Number(m.completion_ratio), groupRatio);
+        items.push({ vendor: vendorOf(model), model, ratio: eff.toFixed(4), ...costs });
+      }
+      if (items.length >= 500) break;
+    }
+    if (items.length > 0) return items;
+  }
+
+  // 2) one-api 旧版：/api/ratio_config
+  const rj = await fetchJson(`${root}/api/ratio_config`);
+  if (rj && rj.success && rj.data) {
+    const modelRatio = parseMaybeJson(rj.data.model_ratio);
+    const completionRatio = parseMaybeJson(rj.data.completion_ratio);
+    const groupRatio = Number(parseMaybeJson(rj.data.group_ratio).default) || 1;
+    const items = [];
+    for (const [model, mr0] of Object.entries(modelRatio)) {
+      const mr = Number(mr0);
+      if (!(mr > 0 && mr < 10000)) continue;
+      const eff = mr * groupRatio;
+      const costs = estimateCosts(mr, Number(completionRatio[model]), groupRatio);
+      items.push({ vendor: vendorOf(model), model, ratio: eff.toFixed(4), ...costs });
+      if (items.length >= 500) break;
+    }
+    if (items.length > 0) return items;
+  }
+  return null;
+}
+
+async function upsertPrices(pool, platformId, items) {
+  const [existing] = await pool.query(
+    "SELECT id, vendor, model, groupName, ratio, shortCost, longCost FROM platform_prices WHERE platformId = ?",
+    [platformId],
+  );
+  const byKey = new Map(existing.map((r) => [`${r.vendor}|${r.model}|${r.groupName}`, r]));
+  let inserted = 0, updated = 0;
+  for (const it of items) {
+    const key = `${it.vendor}|${it.model}|default`;
+    const ex = byKey.get(key);
+    if (!ex) {
+      await pool.query(
+        "INSERT INTO platform_prices (platformId, vendor, model, groupName, ratio, shortCost, longCost) VALUES (?, ?, ?, 'default', ?, ?, ?)",
+        [platformId, it.vendor, it.model, it.ratio, it.shortCost, it.longCost],
+      );
+      inserted++;
+    } else if (
+      String(ex.ratio) !== String(it.ratio) ||
+      String(ex.shortCost) !== String(it.shortCost) ||
+      String(ex.longCost) !== String(it.longCost)
+    ) {
+      await pool.query(
+        "UPDATE platform_prices SET ratio = ?, shortCost = ?, longCost = ? WHERE id = ?",
+        [it.ratio, it.shortCost, it.longCost, ex.id],
+      );
+      updated++;
+    }
+  }
+  return { inserted, updated };
+}
+
+async function collectAllPrices(pool) {
+  const [plats] = await pool.query(
+    "SELECT id, name, url, apiBaseUrl FROM platforms WHERE status IN ('operational','slow')",
+  );
+  console.log(`[pricing] ${new Date().toISOString()} 开始采集 ${plats.length} 个存活站点的价格`);
+  let ok = 0, totalItems = 0;
+  const CHUNK = 10;
+  for (let i = 0; i < plats.length; i += CHUNK) {
+    await Promise.allSettled(
+      plats.slice(i, i + CHUNK).map(async (p) => {
+        const items = await fetchPlatformPrices(p);
+        if (!items) return;
+        const { inserted, updated } = await upsertPrices(pool, p.id, items);
+        ok++;
+        totalItems += items.length;
+        console.log(`[pricing] ${p.name}: ${items.length} 个模型（新增 ${inserted} 更新 ${updated}）`);
+      }),
+    );
+  }
+  console.log(`[pricing] 完成：${ok}/${plats.length} 个站点有公开价格，共 ${totalItems} 条`);
+}
+
+/* ------------------------------------------------------------------ */
+
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is required");
   const pool = mysql.createPool(url);
+
+  let lastPriceRun = 0;
+  const PRICE_INTERVAL = PRICE_INTERVAL_HOURS * 3600 * 1000;
 
   // 启动即执行一轮，之后按间隔循环
   for (;;) {
@@ -164,6 +329,15 @@ async function main() {
       await runOnce(pool);
     } catch (e) {
       console.error("[collector] 本轮失败:", e.message);
+    }
+    // 价格采集默认每 24 小时一轮（启动后立即跑第一轮）
+    if (Date.now() - lastPriceRun > PRICE_INTERVAL) {
+      try {
+        await collectAllPrices(pool);
+        lastPriceRun = Date.now();
+      } catch (e) {
+        console.error("[pricing] 价格采集失败:", e.message);
+      }
     }
     await new Promise((r) => setTimeout(r, INTERVAL_MIN * 60 * 1000));
   }
