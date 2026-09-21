@@ -31,9 +31,11 @@ npx drizzle-kit migrate || echo "[warn] drizzle migrate skipped/failed"
 
 pm2 restart sk-buy
 
-# 确保采集器在运行（每小时探测 + 评分重算）
+# 重启采集器（不存在则启动）
 if ! pm2 describe sk-buy-collector > /dev/null 2>&1; then
   pm2 start scripts/collector.cjs --name sk-buy-collector
+else
+  pm2 restart sk-buy-collector
 fi
 pm2 save
 

@@ -49,7 +49,18 @@ async function runOnce(pool) {
   console.log(`[collector] ${new Date().toISOString()} 探测 ${plats.length} 个平台`);
   const date = todayStr();
 
-  for (const p of plats) {
+  // 10 路并发探测，避免大量平台时单轮耗时过长
+  const CHUNK = 10;
+  for (let i = 0; i < plats.length; i += CHUNK) {
+    const batch = plats.slice(i, i + CHUNK);
+    await Promise.allSettled(batch.map((p) => probeOne(pool, p, date)));
+  }
+
+  await recomputeScores(pool);
+}
+
+async function probeOne(pool, p, date) {
+  try {
     const apiBase = p.apiBaseUrl || `${p.url.replace(/\/+$/, "")}/v1`;
     const r = await probe(apiBase);
     let dayStatus;
@@ -89,9 +100,9 @@ async function runOnce(pool) {
       await pool.query("UPDATE platforms SET status = ? WHERE id = ?", [newStatus, p.id]);
     }
     console.log(`[collector] ${p.name}: ${r.ok ? "可达" : "不可达"} ${r.latencyMs ?? "-"}ms`);
+  } catch (e) {
+    console.error(`[collector] ${p.name} 探测异常:`, e.message);
   }
-
-  await recomputeScores(pool);
 }
 
 async function recomputeScores(pool) {
