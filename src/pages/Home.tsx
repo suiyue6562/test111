@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Sparkles, Megaphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import PlatformCard from "@/components/PlatformCard";
 import { trpc } from "@/providers/trpc";
@@ -8,6 +9,7 @@ import { trpc } from "@/providers/trpc";
 export default function Home() {
   const navigate = useNavigate();
   const { data, isLoading } = trpc.platform.featured.useQuery();
+  const { data: ads } = trpc.platform.adSlots.useQuery();
 
   return (
     <div className="space-y-5">
@@ -28,6 +30,27 @@ export default function Home() {
           进入综合筛选 <ArrowRight className="w-4 h-4 ml-1" />
         </Button>
       </div>
+
+      {/* 赞助广告位：有投放时才显示，明确打标 */}
+      {ads && ads.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Megaphone className="w-3.5 h-3.5 text-amber-500" />
+            赞助推荐
+            <span className="text-muted-foreground/60">· 以下为付费推广内容</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {ads.map((p) => (
+              <div key={p.id} className="relative">
+                <Badge className="absolute -top-2 -right-2 z-10 bg-amber-500 hover:bg-amber-500 text-white shadow">
+                  广告
+                </Badge>
+                <PlatformCard platform={p} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

@@ -59,15 +59,35 @@ async function withStats(db: ReturnType<typeof getDb>, rows: typeof platforms.$i
 const sortEnum = z.enum(["default", "uptime", "latency", "visits", "newest"]);
 
 export const platformRouter = createRouter({
-  /** 首页精选 */
+  /** 首页精选：按综合评分排序 */
   featured: publicQuery.query(async () => {
     const db = getDb();
     const rows = await db
       .select()
       .from(platforms)
       .where(eq(platforms.featured, true))
-      .orderBy(desc(platforms.visitCount))
+      .orderBy(desc(platforms.score), desc(platforms.visitCount))
       .limit(18);
+    return withStats(db, rows);
+  }),
+
+  /** 首页赞助广告位：未过期的广告按权重排序 */
+  adSlots: publicQuery.query(async () => {
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(platforms)
+      .where(
+        and(
+          eq(platforms.isAd, true),
+          or(
+            sql`${platforms.adExpireAt} IS NULL`,
+            sql`${platforms.adExpireAt} > NOW()`,
+          ),
+        ),
+      )
+      .orderBy(desc(platforms.adWeight), desc(platforms.score))
+      .limit(3);
     return withStats(db, rows);
   }),
 
@@ -134,7 +154,7 @@ export const platformRouter = createRouter({
           break;
         default:
           result.sort(
-            (a, b) => Number(b.featured) - Number(a.featured) || b.visitCount - a.visitCount,
+            (a, b) => Number(b.score) - Number(a.score) || b.visitCount - a.visitCount,
           );
       }
       const total = result.length;

@@ -27,10 +27,19 @@ const platformInput = z.object({
   status: z.enum(["operational", "slow", "down", "unknown"]).default("unknown"),
   stage: z.enum(["new", "stable", "watch", "closed"]).default("new"),
   featured: z.boolean().default(false),
+  isAd: z.boolean().default(false),
+  adWeight: z.number().int().min(0).max(9999).default(0),
+  adExpireAt: z.string().nullable().optional(),
 });
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
+}
+
+/** 把表单输入转成数据库可写字段（adExpireAt 字符串 → Date） */
+function normalizePlatformInput<T extends { adExpireAt?: string | null }>(input: T) {
+  const { adExpireAt, ...rest } = input;
+  return { ...rest, adExpireAt: adExpireAt ? new Date(adExpireAt) : null };
 }
 
 export const adminRouter = createRouter({
@@ -69,7 +78,7 @@ export const adminRouter = createRouter({
     const dup = await db.select().from(platforms).where(eq(platforms.domain, input.domain)).limit(1);
     if (dup.length > 0) throw new TRPCError({ code: "CONFLICT", message: "域名已存在" });
     const [{ id }] = await db.insert(platforms).values({
-      ...input,
+      ...normalizePlatformInput(input),
       apiBaseUrl: input.apiBaseUrl || `${input.url.replace(/\/+$/, "")}/v1`,
     }).$returningId();
     // 初始化近 30 天监控为空数据
@@ -92,7 +101,7 @@ export const adminRouter = createRouter({
     .mutation(async ({ input }) => {
       const db = getDb();
       const { id, ...data } = input;
-      await db.update(platforms).set(data).where(eq(platforms.id, id));
+      await db.update(platforms).set(normalizePlatformInput(data)).where(eq(platforms.id, id));
       return { success: true };
     }),
 
@@ -195,7 +204,7 @@ export const adminRouter = createRouter({
         const [{ id: pid }] = await db
           .insert(platforms)
           .values({
-            ...input.platform,
+            ...normalizePlatformInput(input.platform),
             apiBaseUrl: input.platform.apiBaseUrl || `${input.platform.url.replace(/\/+$/, "")}/v1`,
           })
           .$returningId();

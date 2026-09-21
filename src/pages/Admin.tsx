@@ -33,6 +33,7 @@ function PlatformForm({
     description: string | null; vendors: string[]; tags: string[];
     status: "operational" | "slow" | "down" | "unknown";
     stage: "new" | "stable" | "watch" | "closed"; featured: boolean;
+    isAd: boolean; adWeight: number; adExpireAt: Date | string | null;
   } | null;
   onSubmit: (v: Record<string, unknown>) => void;
   pending: boolean;
@@ -48,6 +49,11 @@ function PlatformForm({
     status: initial?.status ?? ("unknown" as const),
     stage: initial?.stage ?? ("new" as const),
     featured: initial?.featured ?? false,
+    isAd: initial?.isAd ?? false,
+    adWeight: initial?.adWeight ?? 0,
+    adExpireAt: initial?.adExpireAt
+      ? new Date(initial.adExpireAt).toISOString().slice(0, 16)
+      : "",
   });
   return (
     <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
@@ -98,12 +104,47 @@ function PlatformForm({
           {f.featured ? "已设为精选" : "设为精选"}
         </Button>
       </div>
+      {/* 广告位设置 */}
+      <div className="rounded-lg border border-dashed border-amber-500/40 p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-amber-600 dark:text-amber-400">赞助广告位</span>
+          <Button
+            type="button"
+            size="sm"
+            variant={f.isAd ? "default" : "outline"}
+            onClick={() => setF({ ...f, isAd: !f.isAd })}
+          >
+            {f.isAd ? "已开启广告位" : "开启广告位"}
+          </Button>
+        </div>
+        {f.isAd && (
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-muted-foreground">广告权重（越大越靠前）</label>
+              <Input
+                type="number"
+                value={f.adWeight}
+                onChange={(e) => setF({ ...f, adWeight: Number(e.target.value) })}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">过期时间（留空 = 长期有效）</label>
+              <Input
+                type="datetime-local"
+                value={f.adExpireAt}
+                onChange={(e) => setF({ ...f, adExpireAt: e.target.value })}
+              />
+            </div>
+          </div>
+        )}
+      </div>
       <Button
         className="w-full bg-indigo-600 hover:bg-indigo-700"
         disabled={pending || !f.name || !f.domain || !f.url}
         onClick={() =>
           onSubmit({
             ...f,
+            adExpireAt: f.adExpireAt ? new Date(f.adExpireAt).toISOString() : null,
             tags: f.tags.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
           })
         }
@@ -225,7 +266,7 @@ export default function Admin() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>名称</TableHead><TableHead>域名</TableHead><TableHead>状态</TableHead>
-                    <TableHead>阶段</TableHead><TableHead>精选</TableHead><TableHead className="text-right">操作</TableHead>
+                    <TableHead>阶段</TableHead><TableHead>精选</TableHead><TableHead>广告</TableHead><TableHead>评分</TableHead><TableHead className="text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -236,6 +277,14 @@ export default function Admin() {
                       <TableCell>{{ operational: "正常", slow: "偏慢", down: "异常", unknown: "未知" }[p.status]}</TableCell>
                       <TableCell>{{ new: "新站收录", stable: "持续运营", watch: "观察中", closed: "已关闭" }[p.stage]}</TableCell>
                       <TableCell>{p.featured ? "⭐" : "—"}</TableCell>
+                      <TableCell>
+                        {p.isAd ? (
+                          <Badge className="bg-amber-500/90 hover:bg-amber-500">权重 {p.adWeight}</Badge>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell>{Number(p.score).toFixed(1)}</TableCell>
                       <TableCell className="text-right space-x-1">
                         <Button size="sm" variant="outline" onClick={() => { setPricePlat(p.id); }}>价格</Button>
                         <Button size="sm" variant="outline" onClick={() => { setEditPlat(p); setEditOpen(true); }}>

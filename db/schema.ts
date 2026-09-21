@@ -55,6 +55,12 @@ export const platforms = mysqlTable(
       .notNull(),
     featured: boolean("featured").default(false).notNull(),
     visitCount: int("visitCount").default(0).notNull(),
+    // 综合评分（采集器每晚重算，0-100）
+    score: decimal("score", { precision: 8, scale: 3 }).default("0").notNull(),
+    // 广告位
+    isAd: boolean("isAd").default(false).notNull(),
+    adWeight: int("adWeight").default(0).notNull(),
+    adExpireAt: timestamp("adExpireAt"),
     ownerId: bigint("ownerId", { mode: "number", unsigned: true }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt")

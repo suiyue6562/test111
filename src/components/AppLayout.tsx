@@ -161,23 +161,6 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
             <BookOpen className="w-4 h-4 shrink-0" />
             {!sidebarCollapsed && <span>{t("guide")}</span>}
           </NavLink>
-
-          {user?.role === "admin" && (
-            <NavLink
-              to="/admin"
-              className={({ isActive }) =>
-                `flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm ${
-                  isActive
-                    ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-medium"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`
-              }
-              title={t("admin")}
-            >
-              <Shield className="w-4 h-4 shrink-0" />
-              {!sidebarCollapsed && <span>{t("admin")}</span>}
-            </NavLink>
-          )}
         </nav>
 
         <div className="p-2 border-t">
@@ -238,11 +221,6 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
                 <DropdownMenuItem onClick={() => navigate("/me")}>
                   <UserIcon className="w-4 h-4 mr-2" /> {t("userCenter")}
                 </DropdownMenuItem>
-                {user?.role === "admin" && (
-                  <DropdownMenuItem onClick={() => navigate("/admin")}>
-                    <Shield className="w-4 h-4 mr-2" /> {t("admin")}
-                  </DropdownMenuItem>
-                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={logout}>
                   <LogOut className="w-4 h-4 mr-2" /> {t("logout")}

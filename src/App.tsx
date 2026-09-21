@@ -1,6 +1,7 @@
 import { Routes, Route } from "react-router";
 import { AppProvider } from "@/lib/app-context";
 import AppLayout from "@/components/AppLayout";
+import AdminLayout from "@/components/AdminLayout";
 import Home from "./pages/Home";
 import Discover from "./pages/Discover";
 import Compare from "./pages/Compare";
@@ -37,7 +38,6 @@ export default function App() {
           <Route path="/forum/c/:slug" element={<Forum />} />
           <Route path="/forum/t/:id" element={<ForumPost />} />
           <Route path="/me" element={<UserCenter />} />
-          <Route path="/admin" element={<Admin />} />
           <Route path="/guide" element={<Guide />} />
           <Route path="/about" element={<StaticPage page="about" />} />
           <Route path="/terms" element={<StaticPage page="terms" />} />
@@ -45,6 +45,10 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Login defaultTab="register" />} />
           <Route path="*" element={<NotFound />} />
+        </Route>
+        {/* 独立管理后台：不使用前台布局，与 UserCenter 完全分离 */}
+        <Route path="/admin" element={<AdminLayout />}>
+          <Route index element={<Admin />} />
         </Route>
       </Routes>
     </AppProvider>
