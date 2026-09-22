@@ -106,7 +106,7 @@ async function fetchHomepageText(url) {
 }
 
 /** 为缺简介或简介过时的站点生成「优势+适合人群」决策摘要（每轮最多 limit 个） */
-async function summarizePlatforms(pool, limit = 40) {
+async function summarizePlatforms(pool, limit = 150) {
   const [plats] = await pool.query(
     `SELECT p.id, p.name, p.url, p.description,
        (SELECT COUNT(DISTINCT model) FROM platform_prices WHERE platformId = p.id) AS models,
@@ -116,7 +116,8 @@ async function summarizePlatforms(pool, limit = 40) {
      FROM platforms p
      WHERE p.status IN ('operational','slow')
        AND (p.description IS NULL OR CHAR_LENGTH(p.description) < 10
-            OR p.description LIKE '收录自%' OR p.description LIKE '%暂未%' OR p.description LIKE '%有待补充%')
+            OR p.description LIKE '收录自%' OR p.description LIKE '%暂未%' OR p.description LIKE '%有待补充%'
+            OR p.description LIKE '%数据来源：%')
      ORDER BY p.visitCount DESC, p.id ASC
      LIMIT ?`,
     [limit],
