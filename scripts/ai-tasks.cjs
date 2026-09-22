@@ -232,7 +232,7 @@ async function scorePlatforms(pool, limit = 40) {
        (SELECT COUNT(*) FROM reviews WHERE platformId = p.id AND status = 'published') AS reviewCount
      FROM platforms p
      WHERE p.status IN ('operational','slow')
-     ORDER BY (p.score = 0) DESC, p.visitCount DESC
+     ORDER BY (p.aiScoredAt IS NULL) DESC, p.aiScoredAt ASC, p.visitCount DESC
      LIMIT ?`,
     [limit],
   );
@@ -274,7 +274,7 @@ async function scorePlatforms(pool, limit = 40) {
   for (const s of scores) {
     const score = Math.max(0, Math.min(100, Math.round(Number(s.score))));
     if (!Number.isFinite(score)) continue;
-    const r = await pool.query("UPDATE platforms SET score = ? WHERE id = ?", [score, Number(s.id)]);
+    const r = await pool.query("UPDATE platforms SET score = ?, aiScoredAt = NOW() WHERE id = ?", [score, Number(s.id)]);
     if (r[0].affectedRows > 0) done++;
   }
   return { total: plats.length, done };
@@ -283,17 +283,19 @@ async function scorePlatforms(pool, limit = 40) {
 /** AI 模型档案：为热门 canonical 模型生成简介+能力标签（排行榜头卡用） */
 async function modelProfiles(pool, limit = 8) {
   const [rows] = await pool.query(
-    `SELECT model, COUNT(DISTINCT platformId) AS sellers FROM platform_prices GROUP BY model`,
+    `SELECT DISTINCT model, platformId FROM platform_prices`,
   );
   const byLabel = new Map();
   for (const r of rows) {
     const c = canonicalModel(r.model);
     if (!c) continue;
-    const cur = byLabel.get(c.label) ?? { label: c.label, family: c.family, sellers: 0 };
-    cur.sellers += Number(r.sellers);
+    const cur = byLabel.get(c.label) ?? { label: c.label, family: c.family, pids: new Set() };
+    cur.pids.add(Number(r.platformId));
     byLabel.set(c.label, cur);
   }
-  const hot = [...byLabel.values()].sort((a, b) => b.sellers - a.sellers);
+  const hot = [...byLabel.values()]
+    .map((e) => ({ label: e.label, family: e.family, sellers: e.pids.size }))
+    .sort((a, b) => b.sellers - a.sellers);
   const [existing] = await pool.query("SELECT label FROM model_profiles");
   const have = new Set(existing.map((e) => e.label));
   const todo = hot.filter((h) => !have.has(h.label)).slice(0, limit);
