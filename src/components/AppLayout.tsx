@@ -185,8 +185,8 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-16 border-b bg-card/60 backdrop-blur sticky top-0 z-20 flex items-center gap-3 px-4">
           <div className="hidden md:block">
-            <div className="text-[10px] tracking-widest text-muted-foreground font-medium">APIXUAN WORKSPACE</div>
-            <div className="text-sm font-semibold">{t("workspace")}</div>
+            <div className="text-[10px] tracking-widest text-muted-foreground font-medium">APIBUY.TOP</div>
+            <div className="text-sm font-semibold">选品推荐，一站掌握</div>
           </div>
           <div className="flex-1" />
           <form onSubmit={doSearch} className="relative hidden sm:block w-64 lg:w-80">

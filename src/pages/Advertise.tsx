@@ -51,7 +51,7 @@ export default function Advertise() {
         </div>
         <h1 className="text-2xl font-bold">广告投放合作</h1>
         <p className="text-sm text-muted-foreground max-w-xl mx-auto">
-          API 优选是中转站导航与评测平台，汇聚精准的中高端 API 用户。7 个广告位全站覆盖，曝光、点击、转化率全量透明可查。
+          apibuy.top 是中转站导航与评测平台，汇聚精准的中高端 API 用户。7 个广告位全站覆盖，曝光、点击、转化率全量透明可查。
         </p>
         <div className="flex justify-center gap-8 pt-2">
           {[
