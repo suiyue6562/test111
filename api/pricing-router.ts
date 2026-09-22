@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { platforms, platformPrices, platformDailyStatus } from "@db/schema";
 import { getDb } from "./queries/connection";
 import { createRouter, publicQuery } from "./middleware";
@@ -113,6 +113,76 @@ export const pricingRouter = createRouter({
         .where(eq(platformPrices.platformId, input.platformId))
         .orderBy(asc(platformPrices.vendor), asc(platformPrices.model));
     }),
+
+  /**
+   * 热门模型全网最低价榜单：按在售站数取热门模型，找出每个模型的最低价站点
+   */
+  lowestBoard: publicQuery.query(async () => {
+    const db = getDb();
+    // 热门模型：在售站点最多的前 30 个
+    const hot = await db
+      .select({
+        model: platformPrices.model,
+        vendor: platformPrices.vendor,
+        sellers: sql<number>`count(distinct ${platformPrices.platformId})`,
+      })
+      .from(platformPrices)
+      .groupBy(platformPrices.model, platformPrices.vendor)
+      .orderBy(desc(sql`count(distinct ${platformPrices.platformId})`))
+      .limit(30);
+    if (hot.length === 0) return [];
+    const rows = await db
+      .select({
+        platformId: platformPrices.platformId,
+        model: platformPrices.model,
+        ratio: platformPrices.ratio,
+        shortCost: platformPrices.shortCost,
+      })
+      .from(platformPrices)
+      .where(inArray(platformPrices.model, hot.map((h) => h.model)));
+    const plats = await db
+      .select({ id: platforms.id, name: platforms.name, domain: platforms.domain, status: platforms.status })
+      .from(platforms)
+      .where(inArray(platforms.id, [...new Set(rows.map((r) => r.platformId))]));
+    const platOf = new Map(plats.map((p) => [p.id, p]));
+    const eff = (r: { ratio: string; shortCost: string }) => {
+      const ratio = Number(r.ratio);
+      return ratio > 0 ? ratio : Number(r.shortCost) || Infinity;
+    };
+    return hot
+      .map((h) => {
+        // 按平台去重取最低，剔除故障站
+        const byPlat = new Map<number, number>();
+        for (const r of rows) {
+          if (r.model !== h.model) continue;
+          const plat = platOf.get(r.platformId);
+          if (!plat || plat.status === "down") continue;
+          const e = eff(r);
+          byPlat.set(r.platformId, Math.min(byPlat.get(r.platformId) ?? Infinity, e));
+        }
+        const sorted = [...byPlat.entries()].sort((a, b) => a[1] - b[1]);
+        if (sorted.length === 0) return null;
+        const [minPid, minEff] = sorted[0];
+        const minPlat = platOf.get(minPid)!;
+        const secondEff = sorted[1]?.[1] ?? null;
+        return {
+          vendor: h.vendor,
+          model: h.model,
+          sellers: sorted.length,
+          minEff,
+          isRatio: minEff !== Infinity,
+          minPlatformId: minPlat.id,
+          minPlatformName: minPlat.name,
+          minDomain: minPlat.domain,
+          // 比次低便宜的百分比（无次低则 null）
+          cheaperThanSecond:
+            secondEff != null && secondEff > 0 && minEff !== Infinity
+              ? Math.round(((secondEff - minEff) / secondEff) * 100)
+              : null,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+  }),
 
   /**
    * 同站比价：该站每个模型在全网的价格排名

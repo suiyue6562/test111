@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowUpDown, ExternalLink, MessageSquarePlus } from "lucide-react";
+import { ArrowUpDown, ExternalLink, MessageSquarePlus, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/providers/trpc";
-import { fmtLatency } from "@/lib/format";
+import { fmtLatency, vendorColor } from "@/lib/format";
 import { toast } from "sonner";
 
 type SortKey = "ratioAsc" | "ratioDesc" | "latencyAsc" | "uptimeDesc";
@@ -37,6 +38,7 @@ export default function Pricing() {
     { vendor, model, groupName, sort },
     { enabled: !!vendor && !!model },
   );
+  const { data: board, isLoading: boardLoading } = trpc.pricing.lowestBoard.useQuery();
 
   const sortBtn = (key: SortKey, label: string) => (
     <button
@@ -52,7 +54,67 @@ export default function Pricing() {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-xl border bg-card p-5 space-y-4">
+      {/* 热门模型全网最低价榜单 */}
+      <div className="rounded-xl border bg-card p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <Trophy className="w-4 h-4 text-amber-500" />
+          <h2 className="font-semibold">热门模型全网最低价</h2>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          在售站点最多的热门模型及其全网最低价站点，点击模型可在下方工作台查看全部报价
+        </p>
+        {boardLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {board?.map((b) => (
+              <div key={b.model} className="rounded-lg border p-3 hover:shadow-sm transition-shadow">
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded ${vendorColor(b.vendor)}`}>{b.vendor}</span>
+                  <button
+                    className="font-mono text-xs font-medium hover:text-indigo-600 dark:hover:text-indigo-400 truncate"
+                    title="在下方查看全部站点报价"
+                    onClick={() => {
+                      setVendor(b.vendor);
+                      setModel(b.model);
+                      document.getElementById("price-workbench")?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  >
+                    {b.model}
+                  </button>
+                  <span className="text-[11px] text-muted-foreground ml-auto shrink-0">{b.sellers} 站在售</span>
+                </div>
+                <div className="flex items-end justify-between mt-2">
+                  <div>
+                    <button
+                      className="text-sm font-medium hover:text-indigo-600 dark:hover:text-indigo-400"
+                      onClick={() => navigate(`/site/${b.minDomain}`)}
+                    >
+                      {b.minPlatformName}
+                    </button>
+                    <div className="text-xs text-muted-foreground">{b.minDomain}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-base font-bold text-indigo-600 dark:text-indigo-400">
+                      {b.isRatio ? `${b.minEff.toFixed(2)}x` : `￥${b.minEff.toFixed(3)}/次`}
+                    </div>
+                    {b.cheaperThanSecond != null && b.cheaperThanSecond > 0 && (
+                      <Badge variant="secondary" className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                        比次低便宜 {b.cheaperThanSecond}%
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 价格筛选工作台 */}
+      <div id="price-workbench" className="rounded-xl border bg-card p-5 space-y-4">
         <div>
           <h1 className="text-lg font-bold">价格筛选</h1>
           <p className="text-sm text-muted-foreground">
