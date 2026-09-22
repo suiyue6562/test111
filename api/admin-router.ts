@@ -102,7 +102,8 @@ export const adminRouter = createRouter({
     .mutation(async ({ input }) => {
       const db = getDb();
       const { id, ...data } = input;
-      await db.update(platforms).set(normalizePlatformInput(data)).where(eq(platforms.id, id));
+      // 管理员手动编辑后重置自动隐藏标记，避免与自动恢复逻辑冲突
+      await db.update(platforms).set({ ...normalizePlatformInput(data), autoClosed: false }).where(eq(platforms.id, id));
       return { success: true };
     }),
 

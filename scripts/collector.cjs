@@ -71,7 +71,7 @@ const WORST = { ok: 0, slow: 1, down: 2, nodata: -1 };
 
 async function runOnce(pool) {
   const [plats] = await pool.query(
-    "SELECT id, name, apiBaseUrl, url, status FROM platforms WHERE stage != 'closed'",
+    "SELECT id, name, apiBaseUrl, url, status FROM platforms WHERE stage != 'closed' OR autoClosed = 1",
   );
   console.log(`[collector] ${new Date().toISOString()} 探测 ${plats.length} 个平台`);
   const date = todayStr();
@@ -100,6 +100,8 @@ async function runOnce(pool) {
 
   await recomputeScores(pool);
 
+  const auto = await autoStageManage(pool);
+
   const avgLat = latencies.length
     ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
     : null;
@@ -108,10 +110,74 @@ async function runOnce(pool) {
     [
       tally.ok,
       tally.down,
-      `ok:${tally.ok} slow:${tally.slow} down:${tally.down} unknown:${tally.nodata}${avgLat != null ? ` avg:${avgLat}ms` : ""}`,
+      `ok:${tally.ok} slow:${tally.slow} down:${tally.down} unknown:${tally.nodata}${avgLat != null ? ` avg:${avgLat}ms` : ""}` +
+        (auto.toWatch || auto.toClosed || auto.recovered || auto.toStable
+          ? ` | 自动:观察+${auto.toWatch} 隐藏+${auto.toClosed} 恢复+${auto.recovered} 稳定+${auto.toStable}`
+          : ""),
       runId,
     ],
   );
+}
+
+/**
+ * 故障站自动处理（基于 platform_daily_status 每日最终状态）：
+ *  - 连续 >=3 天故障：new/stable → 观察中(watch)
+ *  - 连续 >=7 天故障：任意阶段 → 自动隐藏(closed + autoClosed=1)，仍继续探测
+ *  - 自动隐藏后连续 >=3 天正常：恢复为观察中
+ *  - 观察中连续 >=2 天正常：恢复为持续运营(stable)
+ * 管理员手动关闭（autoClosed=0 的 closed）不做任何自动处理
+ */
+async function autoStageManage(pool) {
+  const since = new Date();
+  since.setDate(since.getDate() - 10);
+  const sinceStr = `${since.getFullYear()}-${pad(since.getMonth() + 1)}-${pad(since.getDate())}`;
+  const [plats] = await pool.query("SELECT id, name, stage, autoClosed FROM platforms");
+  const [daily] = await pool.query(
+    "SELECT platformId, date, status FROM platform_daily_status WHERE date >= ?",
+    [sinceStr],
+  );
+  const byP = new Map();
+  for (const d of daily) {
+    if (!byP.has(d.platformId)) byP.set(d.platformId, []);
+    byP.get(d.platformId).push(d);
+  }
+  const r = { toWatch: 0, toClosed: 0, recovered: 0, toStable: 0 };
+  for (const p of plats) {
+    const days = (byP.get(p.id) || []).sort((a, b) => b.date.localeCompare(a.date));
+    let consecDown = 0;
+    for (const d of days) { if (d.status === "down") consecDown++; else break; }
+    let consecOk = 0;
+    for (const d of days) { if (d.status === "ok") consecOk++; else break; }
+
+    if (p.stage === "closed") {
+      // 仅自动关闭的站参与恢复；手动关闭不动
+      if (p.autoClosed && consecOk >= 3) {
+        await pool.query("UPDATE platforms SET stage = 'watch', autoClosed = 0 WHERE id = ?", [p.id]);
+        r.recovered++;
+        console.log(`[auto] ${p.name}: 连续 ${consecOk} 天正常，自动隐藏 → 观察中`);
+      }
+      continue;
+    }
+    if (consecDown >= 7) {
+      await pool.query("UPDATE platforms SET stage = 'closed', autoClosed = 1 WHERE id = ?", [p.id]);
+      r.toClosed++;
+      console.log(`[auto] ${p.name}: 连续 ${consecDown} 天故障，自动隐藏`);
+    } else if (consecDown >= 3 && (p.stage === "new" || p.stage === "stable")) {
+      await pool.query("UPDATE platforms SET stage = 'watch' WHERE id = ?", [p.id]);
+      r.toWatch++;
+      console.log(`[auto] ${p.name}: 连续 ${consecDown} 天故障，转入观察中`);
+    } else if (p.stage === "watch" && consecOk >= 2) {
+      await pool.query("UPDATE platforms SET stage = 'stable' WHERE id = ?", [p.id]);
+      r.toStable++;
+      console.log(`[auto] ${p.name}: 连续 ${consecOk} 天正常，恢复持续运营`);
+    }
+  }
+  if (r.toWatch || r.toClosed || r.recovered || r.toStable) {
+    console.log(
+      `[auto] 阶段调整：观察+${r.toWatch} 隐藏+${r.toClosed} 恢复+${r.recovered} 稳定+${r.toStable}`,
+    );
+  }
+  return r;
 }
 
 async function probeOne(pool, p, date) {

@@ -61,6 +61,8 @@ export const platforms = mysqlTable(
     isAd: boolean("isAd").default(false).notNull(),
     adWeight: int("adWeight").default(0).notNull(),
     adExpireAt: timestamp("adExpireAt"),
+    // 因连续故障被系统自动隐藏（区别于管理员手动关闭），自动关闭的站仍继续探测以便恢复
+    autoClosed: boolean("autoClosed").default(false).notNull(),
     ownerId: bigint("ownerId", { mode: "number", unsigned: true }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt")

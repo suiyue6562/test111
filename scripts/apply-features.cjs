@@ -24,6 +24,7 @@ async function main() {
     ["isAd", "ALTER TABLE platforms ADD COLUMN isAd TINYINT(1) NOT NULL DEFAULT 0 AFTER score"],
     ["adWeight", "ALTER TABLE platforms ADD COLUMN adWeight INT NOT NULL DEFAULT 0 AFTER isAd"],
     ["adExpireAt", "ALTER TABLE platforms ADD COLUMN adExpireAt TIMESTAMP NULL DEFAULT NULL AFTER adWeight"],
+    ["autoClosed", "ALTER TABLE platforms ADD COLUMN autoClosed TINYINT(1) NOT NULL DEFAULT 0 AFTER adExpireAt"],
   ];
   for (const [col, sql] of adds) {
     if (await columnExists(conn, "platforms", col)) {

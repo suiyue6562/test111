@@ -48074,6 +48074,8 @@ var platforms = mysqlTable(
     isAd: boolean4("isAd").default(false).notNull(),
     adWeight: int2("adWeight").default(0).notNull(),
     adExpireAt: timestamp("adExpireAt"),
+    // 因连续故障被系统自动隐藏（区别于管理员手动关闭），自动关闭的站仍继续探测以便恢复
+    autoClosed: boolean4("autoClosed").default(false).notNull(),
     ownerId: bigint4("ownerId", { mode: "number", unsigned: true }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().notNull().$onUpdate(() => /* @__PURE__ */ new Date())
@@ -50552,6 +50554,8 @@ var platformRouter = createRouter({
       conds.push(
         inArray(platforms.stage, input.stage)
       );
+    else
+      conds.push(sql`${platforms.stage} != 'closed'`);
     let rows = await db.select().from(platforms).where(conds.length ? and(...conds) : void 0);
     if (input.vendors?.length) {
       rows = rows.filter(
@@ -51183,7 +51187,7 @@ var adminRouter = createRouter({
   updatePlatform: adminQuery.input(platformInput.extend({ id: external_exports.number() })).mutation(async ({ input }) => {
     const db = getDb();
     const { id, ...data } = input;
-    await db.update(platforms).set(normalizePlatformInput(data)).where(eq(platforms.id, id));
+    await db.update(platforms).set({ ...normalizePlatformInput(data), autoClosed: false }).where(eq(platforms.id, id));
     return { success: true };
   }),
   deletePlatform: adminQuery.input(external_exports.object({ id: external_exports.number() })).mutation(async ({ input }) => {

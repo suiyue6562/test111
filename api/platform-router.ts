@@ -223,6 +223,9 @@ export const platformRouter = createRouter({
         conds.push(
           inArray(platforms.stage, input.stage as Array<"new" | "stable" | "watch" | "closed">),
         );
+      else
+        // 默认隐藏已关闭站点（自动隐藏的死站不再打扰用户；显式筛选"已关闭"时仍可见）
+        conds.push(sql`${platforms.stage} != 'closed'`);
       let rows = await db
         .select()
         .from(platforms)
