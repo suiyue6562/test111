@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import { ArrowRight, Sparkles, Megaphone, Trophy, Flame, Rocket } from "lucide-react";
+import { ArrowRight, Sparkles, Megaphone, Trophy, Flame, Rocket, Tags } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -40,6 +40,7 @@ function Section({
 export default function Home() {
   const navigate = useNavigate();
   const { data, isLoading } = trpc.platform.homeFeed.useQuery();
+  const { data: board } = trpc.pricing.lowestBoard.useQuery();
 
   return (
     <div className="space-y-6">
@@ -117,6 +118,47 @@ export default function Home() {
             items={data?.newSites ?? []}
             tone="text-emerald-500"
           />
+
+          {/* 5. 全网最低价：热门模型价格优势直出 */}
+          {board && board.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Tags className="w-4 h-4 text-indigo-500" />
+                <h2 className="text-base font-semibold">全网最低价</h2>
+                <span className="text-xs text-muted-foreground">热门模型价格洼地，数据每小时更新</span>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="ml-auto text-xs"
+                  onClick={() => navigate("/pricing")}
+                >
+                  查看完整比价 <ArrowRight className="w-3 h-3 ml-0.5" />
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {board.slice(0, 6).map((b) => (
+                  <button
+                    key={b.model}
+                    className="rounded-xl border bg-card p-3.5 text-left hover:shadow-md transition-shadow"
+                    onClick={() => navigate(`/site/${b.minDomain}`)}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs font-medium truncate">{b.model}</span>
+                      <span className="text-[11px] text-muted-foreground ml-auto shrink-0">
+                        {b.sellers} 站在售
+                      </span>
+                    </div>
+                    <div className="flex items-end justify-between mt-2">
+                      <span className="text-sm font-medium truncate">{b.minPlatformName}</span>
+                      <span className="text-base font-bold text-indigo-600 dark:text-indigo-400 shrink-0">
+                        {b.isRatio ? `${b.minEff.toFixed(2)}x` : `￥${b.minEff.toFixed(3)}/次`}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
