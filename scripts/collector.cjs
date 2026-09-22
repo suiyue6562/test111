@@ -535,7 +535,10 @@ async function main() {
   const pool = mysql.createPool(url);
 
   let lastPriceRun = 0;
+  let lastAiRun = 0;
   const PRICE_INTERVAL = PRICE_INTERVAL_HOURS * 3600 * 1000;
+  const AI_INTERVAL = 12 * 3600 * 1000; // AI 复核与整理任务：每天 2 次
+  const { runAiTasks } = require("./ai-tasks.cjs");
 
   // 启动即执行一轮，之后按间隔循环
   for (;;) {
@@ -551,6 +554,15 @@ async function main() {
         lastPriceRun = Date.now();
       } catch (e) {
         console.error("[pricing] 价格采集失败:", e.message);
+      }
+    }
+    // AI 任务（价格复核/站点简介/数据巡检）：启动后首轮价格采集完成后执行，之后每 12 小时
+    if (lastPriceRun > 0 && Date.now() - lastAiRun > AI_INTERVAL) {
+      try {
+        await runAiTasks(pool);
+        lastAiRun = Date.now();
+      } catch (e) {
+        console.error("[ai] AI 任务失败:", e.message);
       }
     }
     await new Promise((r) => setTimeout(r, INTERVAL_MIN * 60 * 1000));
