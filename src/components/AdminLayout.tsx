@@ -27,7 +27,7 @@ export default function AdminLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
+    <div className="min-h-screen bg-slate-100 text-slate-900">
       <header className="h-14 border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-20 flex items-center gap-3 px-5">
         <div className="flex items-center gap-2 font-semibold">
           <Shield className="w-5 h-5 text-indigo-400" />

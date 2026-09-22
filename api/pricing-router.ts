@@ -151,13 +151,14 @@ export const pricingRouter = createRouter({
     };
     return hot
       .map((h) => {
-        // 按平台去重取最低，剔除故障站
+        // 按平台去重取最低，剔除故障站和完全无有效价格的记录（倍率=0 且无花费数据）
         const byPlat = new Map<number, number>();
         for (const r of rows) {
           if (r.model !== h.model) continue;
           const plat = platOf.get(r.platformId);
           if (!plat || plat.status === "down") continue;
           const e = eff(r);
+          if (e === Infinity) continue;
           byPlat.set(r.platformId, Math.min(byPlat.get(r.platformId) ?? Infinity, e));
         }
         const sorted = [...byPlat.entries()].sort((a, b) => a[1] - b[1]);
@@ -237,9 +238,10 @@ export const pricingRouter = createRouter({
         { rank: number; total: number; minPlatformName: string; minDomain: string; minEff: number; myEff: number; isRatio: boolean }
       > = {};
       for (const m of mine) {
-        const sellers = byModel.get(m.model) ?? [];
+        const sellers = (byModel.get(m.model) ?? []).filter((s) => s.eff !== Infinity);
         if (sellers.length < 2) continue; // 全网只有一家卖，无比价意义
         const myEff = eff(m);
+        if (myEff === Infinity) continue; // 本站该模型无有效价格（如纯按次计费），不做对比
         const cheaper = sellers.filter((s) => s.platformId !== input.platformId && s.eff < myEff - 1e-9).length;
         const minSeller = sellers.reduce((a, b) => (b.eff < a.eff ? b : a));
         const minPlat = platOf.get(minSeller.platformId);

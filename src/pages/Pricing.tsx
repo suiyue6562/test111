@@ -94,7 +94,9 @@ export default function Pricing() {
                     >
                       {b.minPlatformName}
                     </button>
-                    <div className="text-xs text-muted-foreground">{b.minDomain}</div>
+                    {b.minPlatformName !== b.minDomain && (
+                      <div className="text-xs text-muted-foreground">{b.minDomain}</div>
+                    )}
                   </div>
                   <div className="text-right">
                     <div className="text-base font-bold text-indigo-600 dark:text-indigo-400">

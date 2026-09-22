@@ -245,6 +245,10 @@ export default function PlatformDetail() {
             {priceGroups.map(([vendor, rows], gi) => {
               // 默认展开前两组，点击切换（toggled 集合记录与默认相反的组）
               const visible = gi < 2 !== collapsed.has(vendor);
+              // 组内最低有效倍率（忽略 0=按次计费的无倍率项）
+              const minRatio = rows.map((r) => Number(r.ratio)).filter((r) => r > 0)[0];
+              // 全组都是缺省价格组时隐藏该列，避免整列"缺省"浪费空间
+              const showGroupCol = rows.some((r) => r.groupName !== "default");
               return (
                 <div key={vendor} className="rounded-lg border overflow-hidden">
                   <button
@@ -255,7 +259,11 @@ export default function PlatformDetail() {
                     <span className={`text-[11px] px-1.5 py-0.5 rounded ${vendorColor(vendor)}`}>{vendor}</span>
                     <span className="text-xs text-muted-foreground">{rows.length} 个模型</span>
                     <span className="text-xs text-muted-foreground ml-auto">
-                      最低 <b className="text-indigo-600 dark:text-indigo-400">{Number(rows[0]?.ratio ?? 0).toFixed(2)}x</b>
+                      {minRatio != null ? (
+                        <>最低 <b className="text-indigo-600 dark:text-indigo-400">{minRatio.toFixed(2)}x</b></>
+                      ) : (
+                        "按次计费"
+                      )}
                     </span>
                   </button>
                   {visible && (
@@ -263,7 +271,7 @@ export default function PlatformDetail() {
                       <thead>
                         <tr className="border-b text-left text-muted-foreground text-xs">
                           <th className="px-3 py-1.5 font-medium">模型</th>
-                          <th className="px-3 py-1.5 font-medium">价格组</th>
+                          {showGroupCol && <th className="px-3 py-1.5 font-medium whitespace-nowrap">价格组</th>}
                           <th className="px-3 py-1.5 font-medium">倍率</th>
                           <th className="px-3 py-1.5 font-medium">短文花费</th>
                           <th className="px-3 py-1.5 font-medium">长文花费</th>
@@ -274,7 +282,9 @@ export default function PlatformDetail() {
                         {rows.map((pr) => (
                           <tr key={pr.id} className="border-b last:border-0 hover:bg-muted/30">
                             <td className="px-3 py-2 font-mono text-xs">{pr.model}</td>
-                            <td className="px-3 py-2 text-xs">{pr.groupName === "default" ? "缺省" : pr.groupName}</td>
+                            {showGroupCol && (
+                              <td className="px-3 py-2 text-xs">{pr.groupName === "default" ? "缺省" : pr.groupName}</td>
+                            )}
                             <td className="px-3 py-2 font-semibold text-indigo-600 dark:text-indigo-400">
                               {Number(pr.ratio) === 0 ? "按次" : `${Number(pr.ratio).toFixed(4)}x`}
                             </td>
@@ -290,10 +300,11 @@ export default function PlatformDetail() {
                                       全网最低 · {cmp.total} 站在售
                                     </Badge>
                                   );
-                                const pct =
-                                  cmp.minEff > 0 && cmp.minEff !== Infinity
+                                const rawPct =
+                                  cmp.minEff > 0 && Number.isFinite(cmp.minEff) && Number.isFinite(cmp.myEff)
                                     ? Math.round(((cmp.myEff - cmp.minEff) / cmp.minEff) * 100)
                                     : null;
+                                const pct = rawPct != null && Number.isFinite(rawPct) ? rawPct : null;
                                 return (
                                   <span
                                     className={pct != null && pct > 50 ? "text-rose-500" : "text-muted-foreground"}

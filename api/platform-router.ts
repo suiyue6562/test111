@@ -227,11 +227,16 @@ export const platformRouter = createRouter({
       .limit(12);
     const newSites = take(newRows, 6);
 
+    // 健康过滤：近 7 天有实测记录但可用率不足 50% 的站不上推荐位
+    // （uptime7 为 null 表示暂无探测数据，新站观察期内保留）
+    const healthy = <T extends { uptime7: number | null }>(arr: T[]) =>
+      arr.filter((r) => r.uptime7 === null || r.uptime7 >= 50);
+
     return {
       ads: await withStats(db, ads),
       excellent: await withStats(db, excellent),
-      hot: await withStats(db, hot),
-      newSites: await withStats(db, newSites),
+      hot: healthy(await withStats(db, hot)),
+      newSites: healthy(await withStats(db, newSites)),
     };
   }),
 

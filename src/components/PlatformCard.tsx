@@ -98,9 +98,9 @@ export default function PlatformCard({
   return (
     <div className="rounded-xl border bg-card p-4 hover:shadow-md transition-shadow flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1 overflow-hidden">
           <button
-            className="font-semibold text-[15px] hover:text-indigo-600 dark:hover:text-indigo-400 truncate block text-left"
+            className="font-semibold text-[15px] hover:text-indigo-600 dark:hover:text-indigo-400 truncate block text-left max-w-full"
             onClick={() => navigate(`/site/${p.domain}`)}
           >
             {p.name}

@@ -50608,11 +50608,12 @@ var platformRouter = createRouter({
       )
     ).orderBy(desc(platforms.createdAt)).limit(12);
     const newSites = take(newRows, 6);
+    const healthy = (arr) => arr.filter((r) => r.uptime7 === null || r.uptime7 >= 50);
     return {
       ads: await withStats(db, ads),
       excellent: await withStats(db, excellent),
-      hot: await withStats(db, hot),
-      newSites: await withStats(db, newSites)
+      hot: healthy(await withStats(db, hot)),
+      newSites: healthy(await withStats(db, newSites))
     };
   }),
   /** 首页精选：按综合评分排序 */
@@ -50987,6 +50988,7 @@ var pricingRouter = createRouter({
         const plat = platOf.get(r.platformId);
         if (!plat || plat.status === "down") continue;
         const e = eff(r);
+        if (e === Infinity) continue;
         byPlat.set(r.platformId, Math.min(byPlat.get(r.platformId) ?? Infinity, e));
       }
       const sorted = [...byPlat.entries()].sort((a, b) => a[1] - b[1]);
@@ -51044,9 +51046,10 @@ var pricingRouter = createRouter({
     }
     const result = {};
     for (const m of mine) {
-      const sellers = byModel.get(m.model) ?? [];
+      const sellers = (byModel.get(m.model) ?? []).filter((s) => s.eff !== Infinity);
       if (sellers.length < 2) continue;
       const myEff = eff(m);
+      if (myEff === Infinity) continue;
       const cheaper = sellers.filter((s) => s.platformId !== input.platformId && s.eff < myEff - 1e-9).length;
       const minSeller = sellers.reduce((a, b) => b.eff < a.eff ? b : a);
       const minPlat = platOf.get(minSeller.platformId);
