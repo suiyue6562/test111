@@ -297,6 +297,8 @@ export const visitLogs = mysqlTable(
     id: serial("id").primaryKey(),
     platformId: bigint("platformId", { mode: "number", unsigned: true }).notNull(),
     userId: bigint("userId", { mode: "number", unsigned: true }),
+    // 点击来源：ad-home / ad-list 为广告位点击，空为自然流量
+    source: varchar("source", { length: 20 }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   (t) => ({
@@ -305,6 +307,25 @@ export const visitLogs = mysqlTable(
 );
 
 export type VisitLog = typeof visitLogs.$inferSelect;
+
+// ---------- 广告曝光埋点 ----------
+export const adImpressions = mysqlTable(
+  "ad_impressions",
+  {
+    id: serial("id").primaryKey(),
+    platformId: bigint("platformId", { mode: "number", unsigned: true }).notNull(),
+    // 曝光位置：home = 首页赞助推荐，list = 筛选页置顶
+    position: varchar("position", { length: 20 }).notNull(),
+    userId: bigint("userId", { mode: "number", unsigned: true }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => ({
+    platformIdx: index("adimp_platform_idx").on(t.platformId),
+    createdIdx: index("adimp_created_idx").on(t.createdAt),
+  }),
+);
+
+export type AdImpression = typeof adImpressions.$inferSelect;
 
 export type InsertPlatformPrice = typeof platformPrices.$inferInsert;
 export type InsertSkrCode = typeof skrCodes.$inferInsert;

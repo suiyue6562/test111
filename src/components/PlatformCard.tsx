@@ -48,11 +48,14 @@ export default function PlatformCard({
   compareMode,
   compared,
   onToggleCompare,
+  adSource,
 }: {
   platform: CardPlatform;
   compareMode?: boolean;
   compared?: boolean;
   onToggleCompare?: (id: number) => void;
+  /** 广告位来源标记：ad-home / ad-list，点击时随访问记录上报 */
+  adSource?: "ad-home" | "ad-list";
 }) {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
@@ -146,7 +149,7 @@ export default function PlatformCard({
           variant="outline"
           size="sm"
           className="flex-1"
-          onClick={() => visit.mutate({ platformId: p.id })}
+          onClick={() => visit.mutate({ platformId: p.id, source: adSource })}
           disabled={visit.isPending}
         >
           <ExternalLink className="w-3.5 h-3.5 mr-1" /> 访问

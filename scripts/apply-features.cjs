@@ -34,6 +34,26 @@ async function main() {
       console.log(`[migrate] platforms.${col} 已添加`);
     }
   }
+
+  // visit_logs.source：点击来源（ad-home / ad-list 为广告位点击）
+  if (await columnExists(conn, "visit_logs", "source")) {
+    console.log("[migrate] visit_logs.source 已存在，跳过");
+  } else {
+    await conn.query("ALTER TABLE visit_logs ADD COLUMN source VARCHAR(20) NULL DEFAULT NULL AFTER userId");
+    console.log("[migrate] visit_logs.source 已添加");
+  }
+
+  // ad_impressions：广告曝光埋点
+  await conn.query(`CREATE TABLE IF NOT EXISTS ad_impressions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    platformId BIGINT UNSIGNED NOT NULL,
+    position VARCHAR(20) NOT NULL,
+    userId BIGINT UNSIGNED NULL,
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX adimp_platform_idx (platformId),
+    INDEX adimp_created_idx (createdAt)
+  )`);
+  console.log("[migrate] ad_impressions 已就绪");
   await conn.end();
   console.log("[migrate] done");
 }

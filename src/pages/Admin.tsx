@@ -178,6 +178,10 @@ export default function Admin() {
     refetchInterval: 60_000,
   });
   const { data: colDown } = trpc.admin.collectorDownSites.useQuery(undefined, { enabled: user?.role === "admin" });
+  const { data: adStats } = trpc.admin.adStats.useQuery(undefined, {
+    enabled: user?.role === "admin",
+    refetchInterval: 60_000,
+  });
 
   const [editOpen, setEditOpen] = useState(false);
   const [editPlat, setEditPlat] = useState<(typeof plats extends (infer T)[] | undefined ? T : never) | null>(null);
@@ -264,6 +268,7 @@ export default function Admin() {
           <TabsTrigger value="acts">活动管理</TabsTrigger>
           <TabsTrigger value="users">用户管理</TabsTrigger>
           <TabsTrigger value="collector">采集监控</TabsTrigger>
+          <TabsTrigger value="adstats">广告效果</TabsTrigger>
         </TabsList>
 
         {/* 平台管理 */}
@@ -604,6 +609,70 @@ export default function Admin() {
                     <TableCell className="text-xs">{Number(p.score).toFixed(1)}</TableCell>
                   </TableRow>
                 ))}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        {/* 广告效果 */}
+        <TabsContent value="adstats" className="pt-4 space-y-4">
+          <div className="rounded-xl border bg-card p-4 overflow-x-auto">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-medium">广告投放效果（曝光 / 点击 / 点击率）</div>
+              <div className="text-xs text-muted-foreground">每分钟自动刷新 · CTR = 点击 ÷ 曝光</div>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>站点</TableHead>
+                  <TableHead>投放状态</TableHead>
+                  <TableHead>权重</TableHead>
+                  <TableHead>7天曝光</TableHead>
+                  <TableHead>7天点击</TableHead>
+                  <TableHead>7天CTR</TableHead>
+                  <TableHead>总曝光（首页/筛选）</TableHead>
+                  <TableHead>总点击</TableHead>
+                  <TableHead>总CTR</TableHead>
+                  <TableHead>过期时间</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {adStats?.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell>
+                      <div className="font-medium">{a.name}</div>
+                      <div className="text-xs text-muted-foreground">{a.domain}</div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={a.adLive ? "default" : "secondary"}>
+                        {a.adLive ? "投放中" : "已过期"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{a.adWeight}</TableCell>
+                    <TableCell>{a.imp7}</TableCell>
+                    <TableCell className="text-indigo-500">{a.clk7}</TableCell>
+                    <TableCell className="font-semibold text-emerald-500">
+                      {a.ctr7 != null ? `${a.ctr7}%` : "—"}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {a.impTotal}（{a.impHome} / {a.impList}）
+                    </TableCell>
+                    <TableCell>{a.clkTotal}</TableCell>
+                    <TableCell className="font-semibold">
+                      {a.ctrTotal != null ? `${a.ctrTotal}%` : "—"}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {a.adExpireAt ? fmtDateTime(a.adExpireAt) : "长期"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {(!adStats || adStats.length === 0) && (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                      暂无投放中的广告位。到「平台管理 → 编辑站点 → 开启赞助广告位」即可开始投放。
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </div>

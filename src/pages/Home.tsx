@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import PlatformCard, { type CardPlatform } from "@/components/PlatformCard";
+import AdBeacon from "@/components/AdBeacon";
 import { trpc } from "@/providers/trpc";
 
 function Section({
@@ -79,10 +80,11 @@ export default function Home() {
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {data.ads.map((p) => (
                   <div key={p.id} className="relative">
+                    <AdBeacon platformId={p.id} position="home" />
                     <Badge className="absolute -top-2 -right-2 z-10 bg-amber-500 hover:bg-amber-500 text-white shadow">
                       广告
                     </Badge>
-                    <PlatformCard platform={p} />
+                    <PlatformCard platform={p} adSource="ad-home" />
                   </div>
                 ))}
               </div>

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   users,
@@ -13,6 +13,8 @@ import {
   sksSubmissions,
   skrActivities,
   skrCodes,
+  visitLogs,
+  adImpressions,
 } from "@db/schema";
 import { getDb } from "./queries/connection";
 import { createRouter, adminQuery } from "./middleware";
@@ -455,6 +457,72 @@ export const adminRouter = createRouter({
       .where(sql`${platforms.status} IN ('down','unknown') AND ${platforms.stage} != 'closed'`)
       .orderBy(desc(platforms.score))
       .limit(100);
+  }),
+
+  /** 广告投放效果：每个广告位的曝光、点击、点击率 */
+  adStats: adminQuery.query(async () => {
+    const db = getDb();
+    const ads = await db
+      .select()
+      .from(platforms)
+      .where(eq(platforms.isAd, true))
+      .orderBy(desc(platforms.adWeight));
+    if (ads.length === 0) return [];
+    const since7 = new Date(Date.now() - 7 * 86400_000);
+
+    const imps = await db
+      .select({
+        platformId: adImpressions.platformId,
+        position: adImpressions.position,
+        n: sql<number>`count(*)`,
+        n7: sql<number>`sum(case when ${adImpressions.createdAt} >= ${since7} then 1 else 0 end)`,
+      })
+      .from(adImpressions)
+      .where(inArray(adImpressions.platformId, ads.map((a) => a.id)))
+      .groupBy(adImpressions.platformId, adImpressions.position);
+
+    const clicks = await db
+      .select({
+        platformId: visitLogs.platformId,
+        n: sql<number>`count(*)`,
+        n7: sql<number>`sum(case when ${visitLogs.createdAt} >= ${since7} then 1 else 0 end)`,
+      })
+      .from(visitLogs)
+      .where(
+        and(
+          inArray(visitLogs.platformId, ads.map((a) => a.id)),
+          inArray(visitLogs.source, ["ad-home", "ad-list"]),
+        ),
+      )
+      .groupBy(visitLogs.platformId);
+
+    return ads.map((a) => {
+      const impRows = imps.filter((i) => i.platformId === a.id);
+      const impTotal = impRows.reduce((s, i) => s + Number(i.n), 0);
+      const imp7 = impRows.reduce((s, i) => s + Number(i.n7), 0);
+      const impHome = Number(impRows.find((i) => i.position === "home")?.n ?? 0);
+      const impList = Number(impRows.find((i) => i.position === "list")?.n ?? 0);
+      const ck = clicks.find((c) => c.platformId === a.id);
+      const clkTotal = Number(ck?.n ?? 0);
+      const clk7 = Number(ck?.n7 ?? 0);
+      return {
+        id: a.id,
+        name: a.name,
+        domain: a.domain,
+        status: a.status,
+        adWeight: a.adWeight,
+        adExpireAt: a.adExpireAt,
+        adLive: !a.adExpireAt || a.adExpireAt.getTime() > Date.now(),
+        impTotal,
+        imp7,
+        impHome,
+        impList,
+        clkTotal,
+        clk7,
+        ctr7: imp7 > 0 ? Math.round((clk7 / imp7) * 1000) / 10 : null,
+        ctrTotal: impTotal > 0 ? Math.round((clkTotal / impTotal) * 1000) / 10 : null,
+      };
+    });
   }),
 
   // ---------- 用户管理 ----------

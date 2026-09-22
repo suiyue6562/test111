@@ -43863,6 +43863,7 @@ function mapRelationalRow(tablesConfig, tableConfig, row, buildQueryResultSelect
 // db/schema.ts
 var schema_exports = {};
 __export(schema_exports, {
+  adImpressions: () => adImpressions,
   collectorRuns: () => collectorRuns,
   favorites: () => favorites,
   forumCategories: () => forumCategories,
@@ -48257,10 +48258,27 @@ var visitLogs = mysqlTable(
     id: serial("id").primaryKey(),
     platformId: bigint4("platformId", { mode: "number", unsigned: true }).notNull(),
     userId: bigint4("userId", { mode: "number", unsigned: true }),
+    // 点击来源：ad-home / ad-list 为广告位点击，空为自然流量
+    source: varchar("source", { length: 20 }),
     createdAt: timestamp("createdAt").defaultNow().notNull()
   },
   (t2) => ({
     platformIdx: index("visit_platform_idx").on(t2.platformId)
+  })
+);
+var adImpressions = mysqlTable(
+  "ad_impressions",
+  {
+    id: serial("id").primaryKey(),
+    platformId: bigint4("platformId", { mode: "number", unsigned: true }).notNull(),
+    // 曝光位置：home = 首页赞助推荐，list = 筛选页置顶
+    position: varchar("position", { length: 20 }).notNull(),
+    userId: bigint4("userId", { mode: "number", unsigned: true }),
+    createdAt: timestamp("createdAt").defaultNow().notNull()
+  },
+  (t2) => ({
+    platformIdx: index("adimp_platform_idx").on(t2.platformId),
+    createdIdx: index("adimp_created_idx").on(t2.createdAt)
   })
 );
 
@@ -50625,17 +50643,41 @@ var platformRouter = createRouter({
     const rows = await db.select().from(platforms).where(inArray(platforms.id, input.ids));
     return withStats(db, rows);
   }),
-  /** 记录访问并返回目标地址 */
-  visit: publicQuery.input(external_exports.object({ platformId: external_exports.number() })).mutation(async ({ input, ctx }) => {
+  /** 记录访问并返回目标地址；source 标记广告位点击（ad-home / ad-list） */
+  visit: publicQuery.input(
+    external_exports.object({
+      platformId: external_exports.number(),
+      source: external_exports.enum(["ad-home", "ad-list"]).optional()
+    })
+  ).mutation(async ({ input, ctx }) => {
     const db = getDb();
     const [p] = await db.select().from(platforms).where(eq(platforms.id, input.platformId)).limit(1);
     if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "\u7AD9\u70B9\u4E0D\u5B58\u5728" });
     await db.insert(visitLogs).values({
       platformId: p.id,
-      userId: ctx.user?.id ?? null
+      userId: ctx.user?.id ?? null,
+      // 只有确实在广告期的站点才记录广告来源，防止刷量污染自然流量
+      source: input.source && isAdActive(p) ? input.source : null
     });
     await db.update(platforms).set({ visitCount: p.visitCount + 1 }).where(eq(platforms.id, p.id));
     return { url: p.url };
+  }),
+  /** 广告位曝光埋点（前端在广告卡片实际渲染时调用） */
+  adImpression: publicQuery.input(
+    external_exports.object({
+      platformId: external_exports.number(),
+      position: external_exports.enum(["home", "list"])
+    })
+  ).mutation(async ({ input, ctx }) => {
+    const db = getDb();
+    const [p] = await db.select({ id: platforms.id, isAd: platforms.isAd, adExpireAt: platforms.adExpireAt }).from(platforms).where(eq(platforms.id, input.platformId)).limit(1);
+    if (!p || !isAdActive(p)) return { recorded: false };
+    await db.insert(adImpressions).values({
+      platformId: p.id,
+      position: input.position,
+      userId: ctx.user?.id ?? null
+    });
+    return { recorded: true };
   }),
   /** 收藏切换 */
   toggleFavorite: authedQuery.input(external_exports.object({ platformId: external_exports.number() })).mutation(async ({ input, ctx }) => {
@@ -51441,6 +51483,56 @@ var adminRouter = createRouter({
       platformDailyStatus,
       sql`${platformDailyStatus.platformId} = ${platforms.id} AND ${platformDailyStatus.date} = ${dateStr2}`
     ).where(sql`${platforms.status} IN ('down','unknown') AND ${platforms.stage} != 'closed'`).orderBy(desc(platforms.score)).limit(100);
+  }),
+  /** 广告投放效果：每个广告位的曝光、点击、点击率 */
+  adStats: adminQuery.query(async () => {
+    const db = getDb();
+    const ads = await db.select().from(platforms).where(eq(platforms.isAd, true)).orderBy(desc(platforms.adWeight));
+    if (ads.length === 0) return [];
+    const since7 = new Date(Date.now() - 7 * 864e5);
+    const imps = await db.select({
+      platformId: adImpressions.platformId,
+      position: adImpressions.position,
+      n: sql`count(*)`,
+      n7: sql`sum(case when ${adImpressions.createdAt} >= ${since7} then 1 else 0 end)`
+    }).from(adImpressions).where(inArray(adImpressions.platformId, ads.map((a) => a.id))).groupBy(adImpressions.platformId, adImpressions.position);
+    const clicks = await db.select({
+      platformId: visitLogs.platformId,
+      n: sql`count(*)`,
+      n7: sql`sum(case when ${visitLogs.createdAt} >= ${since7} then 1 else 0 end)`
+    }).from(visitLogs).where(
+      and(
+        inArray(visitLogs.platformId, ads.map((a) => a.id)),
+        inArray(visitLogs.source, ["ad-home", "ad-list"])
+      )
+    ).groupBy(visitLogs.platformId);
+    return ads.map((a) => {
+      const impRows = imps.filter((i) => i.platformId === a.id);
+      const impTotal = impRows.reduce((s, i) => s + Number(i.n), 0);
+      const imp7 = impRows.reduce((s, i) => s + Number(i.n7), 0);
+      const impHome = Number(impRows.find((i) => i.position === "home")?.n ?? 0);
+      const impList = Number(impRows.find((i) => i.position === "list")?.n ?? 0);
+      const ck = clicks.find((c) => c.platformId === a.id);
+      const clkTotal = Number(ck?.n ?? 0);
+      const clk7 = Number(ck?.n7 ?? 0);
+      return {
+        id: a.id,
+        name: a.name,
+        domain: a.domain,
+        status: a.status,
+        adWeight: a.adWeight,
+        adExpireAt: a.adExpireAt,
+        adLive: !a.adExpireAt || a.adExpireAt.getTime() > Date.now(),
+        impTotal,
+        imp7,
+        impHome,
+        impList,
+        clkTotal,
+        clk7,
+        ctr7: imp7 > 0 ? Math.round(clk7 / imp7 * 1e3) / 10 : null,
+        ctrTotal: impTotal > 0 ? Math.round(clkTotal / impTotal * 1e3) / 10 : null
+      };
+    });
   }),
   // ---------- 用户管理 ----------
   listUsers: adminQuery.query(async () => {

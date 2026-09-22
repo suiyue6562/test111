@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import PlatformCard from "@/components/PlatformCard";
+import AdBeacon from "@/components/AdBeacon";
 import { trpc } from "@/providers/trpc";
 
 const VENDORS = ["OpenAI", "Claude", "Gemini", "DeepSeek", "Qwen", "Kimi", "GLM", "MiniMax", "xAI"];
@@ -184,13 +185,16 @@ export default function Discover() {
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {data?.items.map((p) => (
-              <PlatformCard
-                key={p.id}
-                platform={p}
-                compareMode
-                compared={compareIds.includes(p.id)}
-                onToggleCompare={toggleCompare}
-              />
+              <div key={p.id}>
+                {p.adActive && sort === "default" && <AdBeacon platformId={p.id} position="list" />}
+                <PlatformCard
+                  platform={p}
+                  compareMode
+                  compared={compareIds.includes(p.id)}
+                  onToggleCompare={toggleCompare}
+                  adSource={p.adActive && sort === "default" ? "ad-list" : undefined}
+                />
+              </div>
             ))}
           </div>
           {totalPages > 1 && (

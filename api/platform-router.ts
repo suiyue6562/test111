@@ -7,6 +7,7 @@ import {
   reviews,
   favorites,
   visitLogs,
+  adImpressions,
   users,
 } from "@db/schema";
 import { getDb } from "./queries/connection";
@@ -331,9 +332,14 @@ export const platformRouter = createRouter({
       return withStats(db, rows);
     }),
 
-  /** 记录访问并返回目标地址 */
+  /** 记录访问并返回目标地址；source 标记广告位点击（ad-home / ad-list） */
   visit: publicQuery
-    .input(z.object({ platformId: z.number() }))
+    .input(
+      z.object({
+        platformId: z.number(),
+        source: z.enum(["ad-home", "ad-list"]).optional(),
+      }),
+    )
     .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const [p] = await db
@@ -345,12 +351,39 @@ export const platformRouter = createRouter({
       await db.insert(visitLogs).values({
         platformId: p.id,
         userId: ctx.user?.id ?? null,
+        // 只有确实在广告期的站点才记录广告来源，防止刷量污染自然流量
+        source: input.source && isAdActive(p) ? input.source : null,
       });
       await db
         .update(platforms)
         .set({ visitCount: p.visitCount + 1 })
         .where(eq(platforms.id, p.id));
       return { url: p.url };
+    }),
+
+  /** 广告位曝光埋点（前端在广告卡片实际渲染时调用） */
+  adImpression: publicQuery
+    .input(
+      z.object({
+        platformId: z.number(),
+        position: z.enum(["home", "list"]),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const db = getDb();
+      const [p] = await db
+        .select({ id: platforms.id, isAd: platforms.isAd, adExpireAt: platforms.adExpireAt })
+        .from(platforms)
+        .where(eq(platforms.id, input.platformId))
+        .limit(1);
+      // 只记录确实在广告期的站点，其他直接忽略
+      if (!p || !isAdActive(p)) return { recorded: false };
+      await db.insert(adImpressions).values({
+        platformId: p.id,
+        position: input.position,
+        userId: ctx.user?.id ?? null,
+      });
+      return { recorded: true };
     }),
 
   /** 收藏切换 */
