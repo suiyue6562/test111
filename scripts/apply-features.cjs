@@ -54,6 +54,19 @@ async function main() {
     INDEX adimp_created_idx (createdAt)
   )`);
   console.log("[migrate] ad_impressions 已就绪");
+
+  // ad_campaigns：广告位活动（顶部/底部/左侧/右侧/弹窗）
+  await conn.query(`CREATE TABLE IF NOT EXISTS ad_campaigns (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    platformId BIGINT UNSIGNED NOT NULL,
+    position ENUM('top','bottom','left','right','popup') NOT NULL,
+    weight INT NOT NULL DEFAULT 0,
+    expireAt TIMESTAMP NULL,
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX adc_platform_idx (platformId),
+    INDEX adc_position_idx (position)
+  )`);
+  console.log("[migrate] ad_campaigns 已就绪");
   await conn.end();
   console.log("[migrate] done");
 }

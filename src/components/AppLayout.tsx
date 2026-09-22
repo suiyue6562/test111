@@ -31,6 +31,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { trpc } from "@/providers/trpc";
+import { AdBanner, SideAdRails, AdPopup } from "@/components/AdZones";
 
 const FORUM_CATS = [
   { slug: "general", name: "综合交流" },
@@ -239,9 +240,13 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
           )}
         </header>
 
+        <AdBanner position="top" />
+
         <main className="flex-1 p-4 md:p-6 max-w-[1400px] w-full mx-auto">
           {children ?? <Outlet />}
         </main>
+
+        <AdBanner position="bottom" />
 
         <footer className="border-t py-6 px-6 text-center text-xs text-muted-foreground">
           <div className="flex items-center justify-center gap-4 mb-2 flex-wrap">
@@ -254,6 +259,10 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
           © 2026 API 优选 · 数据仅供演示参考
         </footer>
       </div>
+
+      {/* 侧栏 + 弹窗广告 */}
+      <SideAdRails />
+      <AdPopup />
     </div>
   );
 }

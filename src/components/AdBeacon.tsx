@@ -7,12 +7,14 @@ import { trpc } from "@/providers/trpc";
  */
 const reported = new Set<string>();
 
+export type AdPosition = "home" | "list" | "top" | "bottom" | "left" | "right" | "popup";
+
 export default function AdBeacon({
   platformId,
   position,
 }: {
   platformId: number;
-  position: "home" | "list";
+  position: AdPosition;
 }) {
   const mut = trpc.platform.adImpression.useMutation();
   const mutRef = useRef(mut);

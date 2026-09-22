@@ -43863,6 +43863,7 @@ function mapRelationalRow(tablesConfig, tableConfig, row, buildQueryResultSelect
 // db/schema.ts
 var schema_exports = {};
 __export(schema_exports, {
+  adCampaigns: () => adCampaigns,
   adImpressions: () => adImpressions,
   collectorRuns: () => collectorRuns,
   favorites: () => favorites,
@@ -48281,6 +48282,22 @@ var adImpressions = mysqlTable(
     createdIdx: index("adimp_created_idx").on(t2.createdAt)
   })
 );
+var adCampaigns = mysqlTable(
+  "ad_campaigns",
+  {
+    id: serial("id").primaryKey(),
+    platformId: bigint4("platformId", { mode: "number", unsigned: true }).notNull(),
+    // 广告位置：top 顶部横幅 / bottom 底部横幅 / left 左侧栏 / right 右侧栏 / popup 弹窗
+    position: mysqlEnum("position", ["top", "bottom", "left", "right", "popup"]).notNull(),
+    weight: int2("weight").default(0).notNull(),
+    expireAt: timestamp("expireAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull()
+  },
+  (t2) => ({
+    platformIdx: index("adc_platform_idx").on(t2.platformId),
+    posIdx: index("adc_position_idx").on(t2.position)
+  })
+);
 
 // node_modules/drizzle-orm/mysql2/driver.js
 var import_mysql2 = __toESM(require_mysql2(), 1);
@@ -50472,6 +50489,22 @@ var AD_PIN_LIMIT = 3;
 function isAdActive(p) {
   return p.isAd && (!p.adExpireAt || p.adExpireAt.getTime() > Date.now());
 }
+var ZONE_POSITIONS = ["top", "bottom", "left", "right", "popup"];
+var ZONE_LIMIT = { top: 1, bottom: 1, left: 2, right: 2, popup: 1 };
+async function hasLiveAd(db, p, position) {
+  if ((position === "home" || position === "list") && isAdActive(p)) return true;
+  if (ZONE_POSITIONS.includes(position)) {
+    const rows = await db.select({ id: adCampaigns.id }).from(adCampaigns).where(
+      and(
+        eq(adCampaigns.platformId, p.id),
+        eq(adCampaigns.position, position),
+        or(sql`${adCampaigns.expireAt} IS NULL`, sql`${adCampaigns.expireAt} > NOW()`)
+      )
+    ).limit(1);
+    return rows.length > 0;
+  }
+  return false;
+}
 function ageDays(p) {
   return (Date.now() - p.createdAt.getTime()) / 864e5;
 }
@@ -50655,21 +50688,22 @@ var platformRouter = createRouter({
     const rows = await db.select().from(platforms).where(inArray(platforms.id, input.ids));
     return withStats(db, rows);
   }),
-  /** 记录访问并返回目标地址；source 标记广告位点击（ad-home / ad-list） */
+  /** 记录访问并返回目标地址；source 标记广告位点击（ad-home / ad-list / ad-top 等） */
   visit: publicQuery.input(
     external_exports.object({
       platformId: external_exports.number(),
-      source: external_exports.enum(["ad-home", "ad-list"]).optional()
+      source: external_exports.enum(["ad-home", "ad-list", "ad-top", "ad-bottom", "ad-left", "ad-right", "ad-popup"]).optional()
     })
   ).mutation(async ({ input, ctx }) => {
     const db = getDb();
     const [p] = await db.select().from(platforms).where(eq(platforms.id, input.platformId)).limit(1);
     if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "\u7AD9\u70B9\u4E0D\u5B58\u5728" });
+    const pos = input.source?.replace(/^ad-/, "") ?? "";
+    const validSource = input.source && await hasLiveAd(db, p, pos) ? input.source : null;
     await db.insert(visitLogs).values({
       platformId: p.id,
       userId: ctx.user?.id ?? null,
-      // 只有确实在广告期的站点才记录广告来源，防止刷量污染自然流量
-      source: input.source && isAdActive(p) ? input.source : null
+      source: validSource
     });
     await db.update(platforms).set({ visitCount: p.visitCount + 1 }).where(eq(platforms.id, p.id));
     return { url: p.url };
@@ -50678,18 +50712,40 @@ var platformRouter = createRouter({
   adImpression: publicQuery.input(
     external_exports.object({
       platformId: external_exports.number(),
-      position: external_exports.enum(["home", "list"])
+      position: external_exports.enum(["home", "list", "top", "bottom", "left", "right", "popup"])
     })
   ).mutation(async ({ input, ctx }) => {
     const db = getDb();
     const [p] = await db.select({ id: platforms.id, isAd: platforms.isAd, adExpireAt: platforms.adExpireAt }).from(platforms).where(eq(platforms.id, input.platformId)).limit(1);
-    if (!p || !isAdActive(p)) return { recorded: false };
+    if (!p || !await hasLiveAd(db, p, input.position)) return { recorded: false };
     await db.insert(adImpressions).values({
       platformId: p.id,
       position: input.position,
       userId: ctx.user?.id ?? null
     });
     return { recorded: true };
+  }),
+  /** 区域广告位：顶部/底部/左侧/右侧/弹窗（故障站不展示） */
+  zoneAds: publicQuery.input(external_exports.object({ position: external_exports.enum(["top", "bottom", "left", "right", "popup"]) })).query(async ({ input }) => {
+    const db = getDb();
+    const rows = await db.select({ campaign: adCampaigns, platform: platforms }).from(adCampaigns).innerJoin(platforms, eq(adCampaigns.platformId, platforms.id)).where(
+      and(
+        eq(adCampaigns.position, input.position),
+        or(sql`${adCampaigns.expireAt} IS NULL`, sql`${adCampaigns.expireAt} > NOW()`),
+        sql`${platforms.status} != 'down'`,
+        sql`${platforms.stage} != 'closed'`
+      )
+    ).orderBy(desc(adCampaigns.weight), desc(platforms.score)).limit(ZONE_LIMIT[input.position]);
+    return rows.map((r) => ({
+      campaignId: r.campaign.id,
+      id: r.platform.id,
+      name: r.platform.name,
+      domain: r.platform.domain,
+      url: r.platform.url,
+      description: r.platform.description,
+      vendors: r.platform.vendors,
+      status: r.platform.status
+    }));
   }),
   /** 收藏切换 */
   toggleFavorite: authedQuery.input(external_exports.object({ platformId: external_exports.number() })).mutation(async ({ input, ctx }) => {
@@ -51545,6 +51601,77 @@ var adminRouter = createRouter({
         ctrTotal: impTotal > 0 ? Math.round(clkTotal / impTotal * 1e3) / 10 : null
       };
     });
+  }),
+  /** 广告位活动列表（顶部/底部/左侧/右侧/弹窗），含 7 天曝光/点击/CTR */
+  listCampaigns: adminQuery.query(async () => {
+    const db = getDb();
+    const rows = await db.select({ campaign: adCampaigns, platformName: platforms.name, domain: platforms.domain, status: platforms.status }).from(adCampaigns).innerJoin(platforms, eq(adCampaigns.platformId, platforms.id)).orderBy(desc(adCampaigns.createdAt));
+    if (rows.length === 0) return [];
+    const since7 = new Date(Date.now() - 7 * 864e5);
+    const ids = rows.map((r) => r.campaign.platformId);
+    const imps = await db.select({
+      platformId: adImpressions.platformId,
+      position: adImpressions.position,
+      n: sql`count(*)`,
+      n7: sql`sum(case when ${adImpressions.createdAt} >= ${since7} then 1 else 0 end)`
+    }).from(adImpressions).where(inArray(adImpressions.platformId, ids)).groupBy(adImpressions.platformId, adImpressions.position);
+    const clicks = await db.select({
+      platformId: visitLogs.platformId,
+      source: visitLogs.source,
+      n: sql`count(*)`,
+      n7: sql`sum(case when ${visitLogs.createdAt} >= ${since7} then 1 else 0 end)`
+    }).from(visitLogs).where(and(inArray(visitLogs.platformId, ids), sql`${visitLogs.source} IS NOT NULL`)).groupBy(visitLogs.platformId, visitLogs.source);
+    return rows.map((r) => {
+      const imp = imps.find(
+        (i) => i.platformId === r.campaign.platformId && i.position === r.campaign.position
+      );
+      const ck = clicks.find(
+        (c) => c.platformId === r.campaign.platformId && c.source === `ad-${r.campaign.position}`
+      );
+      const imp7 = Number(imp?.n7 ?? 0);
+      const clk7 = Number(ck?.n7 ?? 0);
+      return {
+        id: r.campaign.id,
+        platformId: r.campaign.platformId,
+        platformName: r.platformName,
+        domain: r.domain,
+        platformStatus: r.status,
+        position: r.campaign.position,
+        weight: r.campaign.weight,
+        expireAt: r.campaign.expireAt,
+        live: !r.campaign.expireAt || r.campaign.expireAt.getTime() > Date.now(),
+        imp7,
+        clk7,
+        impTotal: Number(imp?.n ?? 0),
+        clkTotal: Number(ck?.n ?? 0),
+        ctr7: imp7 > 0 ? Math.round(clk7 / imp7 * 1e3) / 10 : null
+      };
+    });
+  }),
+  createCampaign: adminQuery.input(
+    external_exports.object({
+      platformId: external_exports.number(),
+      position: external_exports.enum(["top", "bottom", "left", "right", "popup"]),
+      weight: external_exports.number().int().min(0).max(9999).default(0),
+      expireAt: external_exports.string().nullable().optional()
+    })
+  ).mutation(async ({ input }) => {
+    const db = getDb();
+    const [p] = await db.select({ id: platforms.id }).from(platforms).where(eq(platforms.id, input.platformId)).limit(1);
+    if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "\u7AD9\u70B9\u4E0D\u5B58\u5728" });
+    const dup = await db.select({ id: adCampaigns.id }).from(adCampaigns).where(and(eq(adCampaigns.platformId, input.platformId), eq(adCampaigns.position, input.position))).limit(1);
+    if (dup.length > 0) throw new TRPCError({ code: "CONFLICT", message: "\u8BE5\u7AD9\u70B9\u5728\u6B64\u4F4D\u7F6E\u5DF2\u6709\u5E7F\u544A\u6D3B\u52A8" });
+    const [{ id }] = await db.insert(adCampaigns).values({
+      platformId: input.platformId,
+      position: input.position,
+      weight: input.weight,
+      expireAt: input.expireAt ? new Date(input.expireAt) : null
+    }).$returningId();
+    return { id };
+  }),
+  deleteCampaign: adminQuery.input(external_exports.object({ id: external_exports.number() })).mutation(async ({ input }) => {
+    await getDb().delete(adCampaigns).where(eq(adCampaigns.id, input.id));
+    return { success: true };
   }),
   // ---------- 用户管理 ----------
   listUsers: adminQuery.query(async () => {

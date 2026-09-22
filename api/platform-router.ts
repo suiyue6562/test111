@@ -8,6 +8,7 @@ import {
   favorites,
   visitLogs,
   adImpressions,
+  adCampaigns,
   users,
 } from "@db/schema";
 import { getDb } from "./queries/connection";
@@ -68,6 +69,36 @@ const AD_PIN_LIMIT = 3;
 
 function isAdActive(p: { isAd: boolean; adExpireAt: Date | null }) {
   return p.isAd && (!p.adExpireAt || p.adExpireAt.getTime() > Date.now());
+}
+
+/** 广告位区域（除首页/列表内置位外的独立广告区） */
+const ZONE_POSITIONS = ["top", "bottom", "left", "right", "popup"] as const;
+type ZonePosition = (typeof ZONE_POSITIONS)[number];
+/** 每个区域同时展示的广告数量上限 */
+const ZONE_LIMIT: Record<ZonePosition, number> = { top: 1, bottom: 1, left: 2, right: 2, popup: 1 };
+
+/** 校验某平台在指定位置是否有进行中的广告（首页/列表看 isAd 标记，区域位看 ad_campaigns） */
+async function hasLiveAd(
+  db: ReturnType<typeof getDb>,
+  p: { id: number; isAd: boolean; adExpireAt: Date | null },
+  position: string,
+) {
+  if ((position === "home" || position === "list") && isAdActive(p)) return true;
+  if ((ZONE_POSITIONS as readonly string[]).includes(position)) {
+    const rows = await db
+      .select({ id: adCampaigns.id })
+      .from(adCampaigns)
+      .where(
+        and(
+          eq(adCampaigns.platformId, p.id),
+          eq(adCampaigns.position, position as ZonePosition),
+          or(sql`${adCampaigns.expireAt} IS NULL`, sql`${adCampaigns.expireAt} > NOW()`),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
+  }
+  return false;
 }
 
 function ageDays(p: { createdAt: Date }) {
@@ -349,12 +380,14 @@ export const platformRouter = createRouter({
       return withStats(db, rows);
     }),
 
-  /** 记录访问并返回目标地址；source 标记广告位点击（ad-home / ad-list） */
+  /** 记录访问并返回目标地址；source 标记广告位点击（ad-home / ad-list / ad-top 等） */
   visit: publicQuery
     .input(
       z.object({
         platformId: z.number(),
-        source: z.enum(["ad-home", "ad-list"]).optional(),
+        source: z
+          .enum(["ad-home", "ad-list", "ad-top", "ad-bottom", "ad-left", "ad-right", "ad-popup"])
+          .optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -365,11 +398,13 @@ export const platformRouter = createRouter({
         .where(eq(platforms.id, input.platformId))
         .limit(1);
       if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "站点不存在" });
+      // 只有确实在广告期的位置才记录广告来源，防止刷量污染自然流量
+      const pos = input.source?.replace(/^ad-/, "") ?? "";
+      const validSource = input.source && (await hasLiveAd(db, p, pos)) ? input.source : null;
       await db.insert(visitLogs).values({
         platformId: p.id,
         userId: ctx.user?.id ?? null,
-        // 只有确实在广告期的站点才记录广告来源，防止刷量污染自然流量
-        source: input.source && isAdActive(p) ? input.source : null,
+        source: validSource,
       });
       await db
         .update(platforms)
@@ -383,7 +418,7 @@ export const platformRouter = createRouter({
     .input(
       z.object({
         platformId: z.number(),
-        position: z.enum(["home", "list"]),
+        position: z.enum(["home", "list", "top", "bottom", "left", "right", "popup"]),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -393,14 +428,45 @@ export const platformRouter = createRouter({
         .from(platforms)
         .where(eq(platforms.id, input.platformId))
         .limit(1);
-      // 只记录确实在广告期的站点，其他直接忽略
-      if (!p || !isAdActive(p)) return { recorded: false };
+      // 只记录确实在广告期的位置，其他直接忽略
+      if (!p || !(await hasLiveAd(db, p, input.position))) return { recorded: false };
       await db.insert(adImpressions).values({
         platformId: p.id,
         position: input.position,
         userId: ctx.user?.id ?? null,
       });
       return { recorded: true };
+    }),
+
+  /** 区域广告位：顶部/底部/左侧/右侧/弹窗（故障站不展示） */
+  zoneAds: publicQuery
+    .input(z.object({ position: z.enum(["top", "bottom", "left", "right", "popup"]) }))
+    .query(async ({ input }) => {
+      const db = getDb();
+      const rows = await db
+        .select({ campaign: adCampaigns, platform: platforms })
+        .from(adCampaigns)
+        .innerJoin(platforms, eq(adCampaigns.platformId, platforms.id))
+        .where(
+          and(
+            eq(adCampaigns.position, input.position),
+            or(sql`${adCampaigns.expireAt} IS NULL`, sql`${adCampaigns.expireAt} > NOW()`),
+            sql`${platforms.status} != 'down'`,
+            sql`${platforms.stage} != 'closed'`,
+          ),
+        )
+        .orderBy(desc(adCampaigns.weight), desc(platforms.score))
+        .limit(ZONE_LIMIT[input.position]);
+      return rows.map((r) => ({
+        campaignId: r.campaign.id,
+        id: r.platform.id,
+        name: r.platform.name,
+        domain: r.platform.domain,
+        url: r.platform.url,
+        description: r.platform.description,
+        vendors: r.platform.vendors,
+        status: r.platform.status,
+      }));
     }),
 
   /** 收藏切换 */

@@ -327,5 +327,25 @@ export const adImpressions = mysqlTable(
 
 export type AdImpression = typeof adImpressions.$inferSelect;
 
+// ---------- 广告位活动（顶部/底部/左侧/右侧/弹窗） ----------
+export const adCampaigns = mysqlTable(
+  "ad_campaigns",
+  {
+    id: serial("id").primaryKey(),
+    platformId: bigint("platformId", { mode: "number", unsigned: true }).notNull(),
+    // 广告位置：top 顶部横幅 / bottom 底部横幅 / left 左侧栏 / right 右侧栏 / popup 弹窗
+    position: mysqlEnum("position", ["top", "bottom", "left", "right", "popup"]).notNull(),
+    weight: int("weight").default(0).notNull(),
+    expireAt: timestamp("expireAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => ({
+    platformIdx: index("adc_platform_idx").on(t.platformId),
+    posIdx: index("adc_position_idx").on(t.position),
+  }),
+);
+
+export type AdCampaign = typeof adCampaigns.$inferSelect;
+
 export type InsertPlatformPrice = typeof platformPrices.$inferInsert;
 export type InsertSkrCode = typeof skrCodes.$inferInsert;

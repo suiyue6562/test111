@@ -15,6 +15,7 @@ import {
   skrCodes,
   visitLogs,
   adImpressions,
+  adCampaigns,
 } from "@db/schema";
 import { getDb } from "./queries/connection";
 import { createRouter, adminQuery } from "./middleware";
@@ -524,6 +525,103 @@ export const adminRouter = createRouter({
       };
     });
   }),
+
+  /** 广告位活动列表（顶部/底部/左侧/右侧/弹窗），含 7 天曝光/点击/CTR */
+  listCampaigns: adminQuery.query(async () => {
+    const db = getDb();
+    const rows = await db
+      .select({ campaign: adCampaigns, platformName: platforms.name, domain: platforms.domain, status: platforms.status })
+      .from(adCampaigns)
+      .innerJoin(platforms, eq(adCampaigns.platformId, platforms.id))
+      .orderBy(desc(adCampaigns.createdAt));
+    if (rows.length === 0) return [];
+    const since7 = new Date(Date.now() - 7 * 86400_000);
+    const ids = rows.map((r) => r.campaign.platformId);
+    const imps = await db
+      .select({
+        platformId: adImpressions.platformId,
+        position: adImpressions.position,
+        n: sql<number>`count(*)`,
+        n7: sql<number>`sum(case when ${adImpressions.createdAt} >= ${since7} then 1 else 0 end)`,
+      })
+      .from(adImpressions)
+      .where(inArray(adImpressions.platformId, ids))
+      .groupBy(adImpressions.platformId, adImpressions.position);
+    const clicks = await db
+      .select({
+        platformId: visitLogs.platformId,
+        source: visitLogs.source,
+        n: sql<number>`count(*)`,
+        n7: sql<number>`sum(case when ${visitLogs.createdAt} >= ${since7} then 1 else 0 end)`,
+      })
+      .from(visitLogs)
+      .where(and(inArray(visitLogs.platformId, ids), sql`${visitLogs.source} IS NOT NULL`))
+      .groupBy(visitLogs.platformId, visitLogs.source);
+    return rows.map((r) => {
+      const imp = imps.find(
+        (i) => i.platformId === r.campaign.platformId && i.position === r.campaign.position,
+      );
+      const ck = clicks.find(
+        (c) => c.platformId === r.campaign.platformId && c.source === `ad-${r.campaign.position}`,
+      );
+      const imp7 = Number(imp?.n7 ?? 0);
+      const clk7 = Number(ck?.n7 ?? 0);
+      return {
+        id: r.campaign.id,
+        platformId: r.campaign.platformId,
+        platformName: r.platformName,
+        domain: r.domain,
+        platformStatus: r.status,
+        position: r.campaign.position,
+        weight: r.campaign.weight,
+        expireAt: r.campaign.expireAt,
+        live: !r.campaign.expireAt || r.campaign.expireAt.getTime() > Date.now(),
+        imp7,
+        clk7,
+        impTotal: Number(imp?.n ?? 0),
+        clkTotal: Number(ck?.n ?? 0),
+        ctr7: imp7 > 0 ? Math.round((clk7 / imp7) * 1000) / 10 : null,
+      };
+    });
+  }),
+
+  createCampaign: adminQuery
+    .input(
+      z.object({
+        platformId: z.number(),
+        position: z.enum(["top", "bottom", "left", "right", "popup"]),
+        weight: z.number().int().min(0).max(9999).default(0),
+        expireAt: z.string().nullable().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const [p] = await db.select({ id: platforms.id }).from(platforms).where(eq(platforms.id, input.platformId)).limit(1);
+      if (!p) throw new TRPCError({ code: "NOT_FOUND", message: "站点不存在" });
+      const dup = await db
+        .select({ id: adCampaigns.id })
+        .from(adCampaigns)
+        .where(and(eq(adCampaigns.platformId, input.platformId), eq(adCampaigns.position, input.position)))
+        .limit(1);
+      if (dup.length > 0) throw new TRPCError({ code: "CONFLICT", message: "该站点在此位置已有广告活动" });
+      const [{ id }] = await db
+        .insert(adCampaigns)
+        .values({
+          platformId: input.platformId,
+          position: input.position,
+          weight: input.weight,
+          expireAt: input.expireAt ? new Date(input.expireAt) : null,
+        })
+        .$returningId();
+      return { id };
+    }),
+
+  deleteCampaign: adminQuery
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await getDb().delete(adCampaigns).where(eq(adCampaigns.id, input.id));
+      return { success: true };
+    }),
 
   // ---------- 用户管理 ----------
   listUsers: adminQuery.query(async () => {

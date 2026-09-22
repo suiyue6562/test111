@@ -182,6 +182,10 @@ export default function Admin() {
     enabled: user?.role === "admin",
     refetchInterval: 60_000,
   });
+  const { data: camps } = trpc.admin.listCampaigns.useQuery(undefined, {
+    enabled: user?.role === "admin",
+    refetchInterval: 60_000,
+  });
 
   const [editOpen, setEditOpen] = useState(false);
   const [editPlat, setEditPlat] = useState<(typeof plats extends (infer T)[] | undefined ? T : never) | null>(null);
@@ -189,6 +193,7 @@ export default function Admin() {
   const [actOpen, setActOpen] = useState(false);
   const [actForm, setActForm] = useState({ title: "", description: "", totalCodes: 50, perUserLimit: 1, minRegisterDays: 0, startAt: "", endAt: "", platformId: "" });
   const [priceForm, setPriceForm] = useState({ vendor: "OpenAI", model: "", groupName: "default", ratio: "", shortCost: "", longCost: "" });
+  const [campForm, setCampForm] = useState({ platformId: "", position: "", weight: 0, expireAt: "" });
 
   const invalidateAll = () => utils.admin.invalidate();
 
@@ -227,6 +232,14 @@ export default function Admin() {
   });
   const delPrice = trpc.admin.deletePrice.useMutation({
     onSuccess: () => { if (pricePlat) utils.admin.listPrices.invalidate({ platformId: pricePlat }); utils.pricing.invalidate(); },
+  });
+  const createCamp = trpc.admin.createCampaign.useMutation({
+    onSuccess: () => { toast.success("广告活动已创建"); setCampForm({ platformId: "", position: "", weight: 0, expireAt: "" }); utils.admin.listCampaigns.invalidate(); },
+    onError: (e) => toast.error(e.message),
+  });
+  const delCamp = trpc.admin.deleteCampaign.useMutation({
+    onSuccess: () => { toast.success("已移除"); utils.admin.listCampaigns.invalidate(); },
+    onError: (e) => toast.error(e.message),
   });
 
   if (isLoading) return <Skeleton className="h-96 rounded-xl" />;
@@ -670,6 +683,106 @@ export default function Admin() {
                   <TableRow>
                     <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                       暂无投放中的广告位。到「平台管理 → 编辑站点 → 开启赞助广告位」即可开始投放。
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* 区域广告位管理（顶部/底部/左侧/右侧/弹窗） */}
+          <div className="rounded-xl border bg-card p-4 space-y-3">
+            <div className="text-sm font-medium">区域广告位（顶部 / 底部 / 左侧 / 右侧 / 弹窗）</div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <Select value={campForm.platformId} onValueChange={(v) => setCampForm({ ...campForm, platformId: v })}>
+                <SelectTrigger><SelectValue placeholder="选择站点" /></SelectTrigger>
+                <SelectContent>
+                  {plats?.map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={campForm.position} onValueChange={(v) => setCampForm({ ...campForm, position: v })}>
+                <SelectTrigger><SelectValue placeholder="广告位置" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="top">顶部横幅</SelectItem>
+                  <SelectItem value="bottom">底部横幅</SelectItem>
+                  <SelectItem value="left">左侧栏</SelectItem>
+                  <SelectItem value="right">右侧栏</SelectItem>
+                  <SelectItem value="popup">弹窗</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                type="number"
+                placeholder="权重"
+                value={campForm.weight}
+                onChange={(e) => setCampForm({ ...campForm, weight: Number(e.target.value) })}
+              />
+              <Input
+                type="datetime-local"
+                value={campForm.expireAt}
+                onChange={(e) => setCampForm({ ...campForm, expireAt: e.target.value })}
+              />
+              <Button
+                className="bg-indigo-600 hover:bg-indigo-700"
+                disabled={createCamp.isPending || !campForm.platformId || !campForm.position}
+                onClick={() =>
+                  createCamp.mutate({
+                    platformId: Number(campForm.platformId),
+                    position: campForm.position as "top" | "bottom" | "left" | "right" | "popup",
+                    weight: campForm.weight,
+                    expireAt: campForm.expireAt ? new Date(campForm.expireAt).toISOString() : null,
+                  })
+                }
+              >
+                <Plus className="w-4 h-4 mr-1" /> 投放
+              </Button>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>站点</TableHead><TableHead>位置</TableHead><TableHead>状态</TableHead>
+                  <TableHead>权重</TableHead><TableHead>7天曝光</TableHead><TableHead>7天点击</TableHead>
+                  <TableHead>7天CTR</TableHead><TableHead>总曝光</TableHead><TableHead>总点击</TableHead>
+                  <TableHead>过期时间</TableHead><TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {camps?.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell>
+                      <div className="font-medium">{c.platformName}</div>
+                      <div className="text-xs text-muted-foreground">{c.domain}</div>
+                    </TableCell>
+                    <TableCell>
+                      {{ top: "顶部", bottom: "底部", left: "左侧", right: "右侧", popup: "弹窗" }[c.position]}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={c.live ? "default" : "secondary"}>{c.live ? "投放中" : "已过期"}</Badge>
+                      {c.platformStatus === "down" && (
+                        <Badge variant="destructive" className="ml-1">站点故障</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>{c.weight}</TableCell>
+                    <TableCell>{c.imp7}</TableCell>
+                    <TableCell className="text-indigo-500">{c.clk7}</TableCell>
+                    <TableCell className="font-semibold text-emerald-500">
+                      {c.ctr7 != null ? `${c.ctr7}%` : "—"}
+                    </TableCell>
+                    <TableCell>{c.impTotal}</TableCell>
+                    <TableCell>{c.clkTotal}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {c.expireAt ? fmtDateTime(c.expireAt) : "长期"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button size="sm" variant="destructive" onClick={() => delCamp.mutate({ id: c.id })}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {(!camps || camps.length === 0) && (
+                  <TableRow>
+                    <TableCell colSpan={11} className="text-center text-muted-foreground py-6">
+                      暂无区域广告投放。上方选择站点和位置即可投放。
                     </TableCell>
                   </TableRow>
                 )}
