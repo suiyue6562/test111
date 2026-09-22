@@ -360,6 +360,17 @@ export const pricingRouter = createRouter({
         const c = Number(r.shortCost);
         return c > 0 ? { e: c, isRatio: false } : null;
       };
+      // 极端倍率过滤：default 组始终保留（用户真实默认价）；
+      // 非标组只保留官方基准 0.1~20 倍内的倍率价（蹭名钓饵价/天价组不参与排序）；按次计费保留
+      const RATIO_FLOOR = 0.1;
+      const RATIO_CEIL = 20;
+      const plausible = (r: (typeof prices)[number]) => {
+        const v = effOf(r);
+        if (!v) return null;
+        if (r.groupName === "default") return v;
+        if (!v.isRatio) return v;
+        return v.e >= RATIO_FLOOR && v.e <= RATIO_CEIL ? v : null;
+      };
       const rowsByPlat = new Map<number, typeof prices>();
       for (const r of prices) {
         const arr = rowsByPlat.get(r.platformId) ?? [];
@@ -368,15 +379,17 @@ export const pricingRouter = createRouter({
       }
       const bestByPlat = new Map<number, { row: (typeof prices)[number]; e: number; isRatio: boolean }>();
       for (const [pid, rows] of rowsByPlat) {
-        const defaults = rows.filter((r) => r.groupName === "default");
-        const pool2 = defaults.length > 0 ? defaults : rows;
-        let best: { row: (typeof prices)[number]; e: number; isRatio: boolean } | null = null;
-        for (const r of pool2) {
-          const v = effOf(r);
-          if (!v) continue;
-          if (!best || v.e < best.e) best = { row: r, ...v };
+        const valids: { row: (typeof prices)[number]; e: number; isRatio: boolean }[] = [];
+        for (const r of rows) {
+          const v = plausible(r);
+          if (v) valids.push({ row: r, ...v });
         }
-        if (best) bestByPlat.set(pid, best);
+        if (valids.length === 0) continue; // 该站此模型只有极端价，不上榜
+        const defaults = valids.filter((x) => x.row.groupName === "default");
+        const pool2 = defaults.length > 0 ? defaults : valids;
+        let best = pool2[0];
+        for (const x of pool2) if (x.e < best.e) best = x;
+        bestByPlat.set(pid, best);
       }
 
       const plats = await db

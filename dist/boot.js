@@ -51230,6 +51230,15 @@ var pricingRouter = createRouter({
       const c = Number(r.shortCost);
       return c > 0 ? { e: c, isRatio: false } : null;
     };
+    const RATIO_FLOOR = 0.1;
+    const RATIO_CEIL = 20;
+    const plausible = (r) => {
+      const v = effOf(r);
+      if (!v) return null;
+      if (r.groupName === "default") return v;
+      if (!v.isRatio) return v;
+      return v.e >= RATIO_FLOOR && v.e <= RATIO_CEIL ? v : null;
+    };
     const rowsByPlat = /* @__PURE__ */ new Map();
     for (const r of prices) {
       const arr = rowsByPlat.get(r.platformId) ?? [];
@@ -51238,15 +51247,17 @@ var pricingRouter = createRouter({
     }
     const bestByPlat = /* @__PURE__ */ new Map();
     for (const [pid, rows] of rowsByPlat) {
-      const defaults = rows.filter((r) => r.groupName === "default");
-      const pool2 = defaults.length > 0 ? defaults : rows;
-      let best = null;
-      for (const r of pool2) {
-        const v = effOf(r);
-        if (!v) continue;
-        if (!best || v.e < best.e) best = { row: r, ...v };
+      const valids = [];
+      for (const r of rows) {
+        const v = plausible(r);
+        if (v) valids.push({ row: r, ...v });
       }
-      if (best) bestByPlat.set(pid, best);
+      if (valids.length === 0) continue;
+      const defaults = valids.filter((x) => x.row.groupName === "default");
+      const pool2 = defaults.length > 0 ? defaults : valids;
+      let best = pool2[0];
+      for (const x of pool2) if (x.e < best.e) best = x;
+      bestByPlat.set(pid, best);
     }
     const plats = await db.select().from(platforms).where(inArray(platforms.id, [...bestByPlat.keys()]));
     const platOf = new Map(plats.map((p) => [p.id, p]));

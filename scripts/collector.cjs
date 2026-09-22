@@ -364,7 +364,16 @@ function estimateCosts(modelRatio, completionRatio, groupRatio) {
 async function fetchPlatformPrices(platform) {
   const root = (platform.url || "").replace(/\/+$/, "");
   if (!root) return null;
-  const MAX_ITEMS = 2000; // 单站价格记录上限（模型×组）
+  const MAX_ITEMS = 10000; // 单站价格记录上限（模型×组）；超出时 default 组优先保留
+  const HARD_CAP = 30000; // 防御性硬上限，避免异常站撑爆内存
+
+  /** 截断时 default 组优先保留，并标记 truncated（截断后禁止失效清理，防止误删） */
+  function finalize(items) {
+    if (items.length <= MAX_ITEMS) return { items, truncated: false };
+    const def = items.filter((i) => i.groupName === "default");
+    const rest = items.filter((i) => i.groupName !== "default");
+    return { items: [...def, ...rest].slice(0, MAX_ITEMS), truncated: true };
+  }
 
   // 1) new-api：/api/pricing
   const pj = await fetchJson(`${root}/api/pricing`);
@@ -391,11 +400,11 @@ async function fetchPlatformPrices(platform) {
           const costs = estimateCosts(mr, Number(m.completion_ratio), gr);
           items.push({ vendor: vendorOf(model), model, groupName: g, ratio: eff.toFixed(4), ...costs, source: "api_pricing" });
         }
-        if (items.length >= MAX_ITEMS) break;
+        if (items.length >= HARD_CAP) break;
       }
-      if (items.length >= MAX_ITEMS) break;
+      if (items.length >= HARD_CAP) break;
     }
-    if (items.length > 0) return items;
+    if (items.length > 0) return finalize(items);
   }
 
   // 2) one-api 旧版：/api/ratio_config（无分组可用性信息，仅按各组倍率全量展开）
@@ -417,11 +426,11 @@ async function fetchPlatformPrices(platform) {
         const eff = mr * gr;
         const costs = estimateCosts(mr, Number(completionRatio[model]), gr);
         items.push({ vendor: vendorOf(model), model, groupName: g, ratio: eff.toFixed(4), ...costs, source: "ratio_config" });
-        if (items.length >= MAX_ITEMS) break;
+        if (items.length >= HARD_CAP) break;
       }
-      if (items.length >= MAX_ITEMS) break;
+      if (items.length >= HARD_CAP) break;
     }
-    if (items.length > 0) return items;
+    if (items.length > 0) return finalize(items);
   }
 
   // 3) OpenRouter 风格：/api/v1/models 返回 data[].pricing（美元/token 绝对价）
@@ -439,9 +448,9 @@ async function fetchPlatformPrices(platform) {
       const cr = pc > 0 ? pc / pp : 3;
       const costs = estimateCosts(ratio, cr, 1);
       items.push({ vendor: vendorOf(model), model, groupName: "default", ratio: ratio.toFixed(4), ...costs, source: "openrouter_api" });
-      if (items.length >= MAX_ITEMS) break;
+      if (items.length >= HARD_CAP) break;
     }
-    if (items.length > 0) return items;
+    if (items.length > 0) return finalize(items);
   }
   return null;
 }
@@ -450,8 +459,9 @@ async function fetchPlatformPrices(platform) {
  * 价格入库：突变检测 + 失效清理
  * - 倍率相对旧值变化超过 30% 标记 needReview=1（后台人工复核）
  * - 官网本次未返回的（模型,组）记录删除，避免展示已下架价格
+ * - truncated=true（官网数据超过单站上限被截断）时跳过失效清理，防止误删真实价格
  */
-async function upsertPrices(pool, platformId, items) {
+async function upsertPrices(pool, platformId, items, truncated = false) {
   const [existing] = await pool.query(
     "SELECT id, vendor, model, groupName, ratio, shortCost, longCost FROM platform_prices WHERE platformId = ?",
     [platformId],
@@ -495,13 +505,15 @@ async function upsertPrices(pool, platformId, items) {
       await pool.query("UPDATE platform_prices SET collectedAt = NOW() WHERE id = ?", [ex.id]);
     }
   }
-  // 失效清理：本次官网未返回的（模型,组）价格删除
+  // 失效清理：本次官网未返回的（模型,组）价格删除；截断时跳过（截断集合不代表官网全集）
   let removed = 0;
-  for (const r of existing) {
-    const key = `${r.vendor}|${r.model}|${r.groupName}`;
-    if (!seenKeys.has(key)) {
-      await pool.query("DELETE FROM platform_prices WHERE id = ?", [r.id]);
-      removed++;
+  if (!truncated) {
+    for (const r of existing) {
+      const key = `${r.vendor}|${r.model}|${r.groupName}`;
+      if (!seenKeys.has(key)) {
+        await pool.query("DELETE FROM platform_prices WHERE id = ?", [r.id]);
+        removed++;
+      }
     }
   }
   return { inserted, updated, flagged, removed };
@@ -522,16 +534,17 @@ async function collectAllPrices(pool) {
   for (let i = 0; i < plats.length; i += CHUNK) {
     await Promise.allSettled(
       plats.slice(i, i + CHUNK).map(async (p) => {
-        const items = await fetchPlatformPrices(p);
-        if (!items) return;
-        const { inserted, updated, flagged, removed } = await upsertPrices(pool, p.id, items);
+        const res = await fetchPlatformPrices(p);
+        if (!res) return;
+        const { items, truncated } = res;
+        const { inserted, updated, flagged, removed } = await upsertPrices(pool, p.id, items, truncated);
         ok++;
         totalItems += items.length;
         insertedTotal += inserted;
         updatedTotal += updated;
         flaggedTotal += flagged;
         removedTotal += removed;
-        console.log(`[pricing] ${p.name}: ${items.length} 条价格（新增 ${inserted} 更新 ${updated} 突变 ${flagged} 清理 ${removed}）`);
+        console.log(`[pricing] ${p.name}: ${items.length} 条价格（新增 ${inserted} 更新 ${updated} 突变 ${flagged} 清理 ${removed}）${truncated ? " [超上限截断,已跳过失效清理]" : ""}`);
       }),
     );
   }
