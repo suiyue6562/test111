@@ -360,14 +360,13 @@ export const pricingRouter = createRouter({
         const c = Number(r.shortCost);
         return c > 0 ? { e: c, isRatio: false } : null;
       };
-      // 极端倍率过滤：default 组始终保留（用户真实默认价）；
-      // 非标组只保留官方基准 0.1~20 倍内的倍率价（蹭名钓饵价/天价组不参与排序）；按次计费保留
+      // 极端倍率过滤：只保留官方基准 0.1~20 倍内的倍率价（蹭名钓饵价 0.05x / 天价 175x 即使挂在 default 组也不上榜）；
+      // 按次计费（绝对价）不参与倍率过滤
       const RATIO_FLOOR = 0.1;
       const RATIO_CEIL = 20;
       const plausible = (r: (typeof prices)[number]) => {
         const v = effOf(r);
         if (!v) return null;
-        if (r.groupName === "default") return v;
         if (!v.isRatio) return v;
         return v.e >= RATIO_FLOOR && v.e <= RATIO_CEIL ? v : null;
       };

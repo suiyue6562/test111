@@ -51235,7 +51235,6 @@ var pricingRouter = createRouter({
     const plausible = (r) => {
       const v = effOf(r);
       if (!v) return null;
-      if (r.groupName === "default") return v;
       if (!v.isRatio) return v;
       return v.e >= RATIO_FLOOR && v.e <= RATIO_CEIL ? v : null;
     };
