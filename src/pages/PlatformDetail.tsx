@@ -90,13 +90,27 @@ export default function PlatformDetail() {
       arr.push(pr);
       groups.set(pr.vendor, arr);
     }
-    // 组内按倍率升序（便宜在前），组间按最低倍率升序
+    // 组内先按模型名、再按倍率升序（同模型的多价格组记录相邻展示）；组间按最低倍率升序
     for (const arr of groups.values()) {
-      arr.sort((a, b) => Number(a.ratio) - Number(b.ratio));
+      arr.sort((a, b) => a.model.localeCompare(b.model) || Number(a.ratio) - Number(b.ratio));
     }
     return [...groups.entries()].sort(
-      (a, b) => Number(a[1][0]?.ratio ?? 0) - Number(b[1][0]?.ratio ?? 0),
+      (a, b) => {
+        const minA = Math.min(...a[1].map((r) => Number(r.ratio)).filter((r) => r > 0), Infinity);
+        const minB = Math.min(...b[1].map((r) => Number(r.ratio)).filter((r) => r > 0), Infinity);
+        return (minA === Infinity ? 0 : minA) - (minB === Infinity ? 0 : minB);
+      },
     );
+  }, [prices]);
+
+  // 价格数据最近采集时间（新鲜度展示）
+  const priceUpdatedAt = useMemo(() => {
+    let latest: string | Date | null = null;
+    for (const pr of prices ?? []) {
+      if (!pr.collectedAt) continue;
+      if (!latest || new Date(pr.collectedAt) > new Date(latest)) latest = pr.collectedAt;
+    }
+    return latest;
   }, [prices]);
 
   if (isLoading) return <Skeleton className="h-96 rounded-xl" />;
@@ -239,7 +253,11 @@ export default function PlatformDetail() {
         <div className="rounded-xl border bg-card p-5">
           <h2 className="font-semibold mb-1">模型报价</h2>
           <p className="text-xs text-muted-foreground mb-3">
-            按供应商分组，点击组名折叠/展开；倍率为相对官方价格的人民币倍率，花费为估算单次调用成本
+            按供应商分组，点击组名折叠/展开；倍率为相对官方价格的人民币倍率，花费为估算单次调用成本；
+            同一模型不同价格组（价格组列）价格不同。
+            {priceUpdatedAt
+              ? <>数据来自站点官网接口，更新于 <b className="text-foreground">{timeAgo(priceUpdatedAt)}</b>，最终以官网为准。</>
+              : "数据来自站点官网接口，最终以官网为准。"}
           </p>
           <div className="space-y-2">
             {priceGroups.map(([vendor, rows], gi) => {

@@ -145,6 +145,11 @@ export const platformPrices = mysqlTable(
     ratio: decimal("ratio", { precision: 10, scale: 4 }).notNull(), // 人民币倍率
     shortCost: decimal("shortCost", { precision: 10, scale: 4 }).notNull(), // 预估短文花费 ￥/次
     longCost: decimal("longCost", { precision: 10, scale: 4 }).notNull(), // 预估长文花费 ￥/次
+    source: varchar("source", { length: 32 }).default("api_pricing").notNull(), // 采集来源：api_pricing / ratio_config
+    collectedAt: timestamp("collectedAt"), // 最近采集时间（新鲜度依据）
+    prevRatio: decimal("prevRatio", { precision: 10, scale: 4 }), // 上次采集的倍率（突变检测用）
+    ratioChangedAt: timestamp("ratioChangedAt"), // 倍率最近变化时间
+    needReview: int("needReview").default(0).notNull(), // 突变待复核：1=待人工确认
   },
   (t) => ({
     modelIdx: index("price_model_idx").on(t.vendor, t.model),

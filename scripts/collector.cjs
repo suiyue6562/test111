@@ -356,69 +356,97 @@ function estimateCosts(modelRatio, completionRatio, groupRatio) {
   };
 }
 
-/** 从单个站点采集价格，返回 [{vendor, model, ratio, shortCost, longCost}] */
+/**
+ * 从单个站点采集价格，返回 [{vendor, model, groupName, ratio, shortCost, longCost, source}]
+ * 核心原则：每个模型只在其 enable_groups 实际开放的组里计价，
+ * 绝不把 default 组倍率套用到不售卖的组（此前价格错误的主因）。
+ */
 async function fetchPlatformPrices(platform) {
   const root = (platform.url || "").replace(/\/+$/, "");
   if (!root) return null;
+  const MAX_ITEMS = 2000; // 单站价格记录上限（模型×组）
 
   // 1) new-api：/api/pricing
   const pj = await fetchJson(`${root}/api/pricing`);
   if (pj && pj.success && Array.isArray(pj.data) && pj.data.length > 0) {
-    const groupRatio = Number(parseMaybeJson(pj.group_ratio).default) || 1;
+    const groupRatios = parseMaybeJson(pj.group_ratio); // { 组名: 倍率 }
     const items = [];
     for (const m of pj.data) {
       const model = m.model_name || m.model;
       if (!model) continue;
-      if (m.quota_type === 1 && Number(m.model_price) > 0) {
-        // 按次计费：model_price 为 quota（$1 = 500000 quota）
-        const cost = ((Number(m.model_price) / 500000) * USD_CNY * groupRatio).toFixed(4);
-        items.push({ vendor: vendorOf(model), model, ratio: "0", shortCost: cost, longCost: cost });
-      } else {
-        const mr = Number(m.model_ratio);
-        if (!(mr > 0 && mr < 10000)) continue;
-        const eff = mr * groupRatio;
-        const costs = estimateCosts(mr, Number(m.completion_ratio), groupRatio);
-        items.push({ vendor: vendorOf(model), model, ratio: eff.toFixed(4), ...costs });
+      // 该模型实际开放的组：enable_groups ∩ 有倍率的组；缺 enable_groups 时回退 default
+      const enabled = Array.isArray(m.enable_groups) && m.enable_groups.length > 0
+        ? m.enable_groups.filter((g) => Number(groupRatios[g]) > 0)
+        : (Number(groupRatios.default) > 0 ? ["default"] : []);
+      for (const g of enabled) {
+        const gr = Number(groupRatios[g]);
+        if (m.quota_type === 1 && Number(m.model_price) > 0) {
+          // 按次计费：model_price 为 quota（$1 = 500000 quota）
+          const cost = ((Number(m.model_price) / 500000) * USD_CNY * gr).toFixed(4);
+          items.push({ vendor: vendorOf(model), model, groupName: g, ratio: "0", shortCost: cost, longCost: cost, source: "api_pricing" });
+        } else {
+          const mr = Number(m.model_ratio);
+          if (!(mr > 0 && mr < 10000)) continue;
+          const eff = mr * gr;
+          const costs = estimateCosts(mr, Number(m.completion_ratio), gr);
+          items.push({ vendor: vendorOf(model), model, groupName: g, ratio: eff.toFixed(4), ...costs, source: "api_pricing" });
+        }
+        if (items.length >= MAX_ITEMS) break;
       }
-      if (items.length >= 500) break;
+      if (items.length >= MAX_ITEMS) break;
     }
     if (items.length > 0) return items;
   }
 
-  // 2) one-api 旧版：/api/ratio_config
+  // 2) one-api 旧版：/api/ratio_config（无分组可用性信息，仅按各组倍率全量展开）
   const rj = await fetchJson(`${root}/api/ratio_config`);
   if (rj && rj.success && rj.data) {
     const modelRatio = parseMaybeJson(rj.data.model_ratio);
     const completionRatio = parseMaybeJson(rj.data.completion_ratio);
-    const groupRatio = Number(parseMaybeJson(rj.data.group_ratio).default) || 1;
+    const groupRatios = parseMaybeJson(rj.data.group_ratio);
+    const groups = Object.entries(groupRatios)
+      .filter(([, v]) => Number(v) > 0)
+      .map(([g]) => g);
+    const useGroups = groups.length > 0 ? groups : ["default"];
     const items = [];
     for (const [model, mr0] of Object.entries(modelRatio)) {
       const mr = Number(mr0);
       if (!(mr > 0 && mr < 10000)) continue;
-      const eff = mr * groupRatio;
-      const costs = estimateCosts(mr, Number(completionRatio[model]), groupRatio);
-      items.push({ vendor: vendorOf(model), model, ratio: eff.toFixed(4), ...costs });
-      if (items.length >= 500) break;
+      for (const g of useGroups) {
+        const gr = Number(groupRatios[g]) || 1;
+        const eff = mr * gr;
+        const costs = estimateCosts(mr, Number(completionRatio[model]), gr);
+        items.push({ vendor: vendorOf(model), model, groupName: g, ratio: eff.toFixed(4), ...costs, source: "ratio_config" });
+        if (items.length >= MAX_ITEMS) break;
+      }
+      if (items.length >= MAX_ITEMS) break;
     }
     if (items.length > 0) return items;
   }
   return null;
 }
 
+/**
+ * 价格入库：突变检测 + 失效清理
+ * - 倍率相对旧值变化超过 30% 标记 needReview=1（后台人工复核）
+ * - 官网本次未返回的（模型,组）记录删除，避免展示已下架价格
+ */
 async function upsertPrices(pool, platformId, items) {
   const [existing] = await pool.query(
     "SELECT id, vendor, model, groupName, ratio, shortCost, longCost FROM platform_prices WHERE platformId = ?",
     [platformId],
   );
   const byKey = new Map(existing.map((r) => [`${r.vendor}|${r.model}|${r.groupName}`, r]));
-  let inserted = 0, updated = 0;
+  const seenKeys = new Set();
+  let inserted = 0, updated = 0, flagged = 0;
   for (const it of items) {
-    const key = `${it.vendor}|${it.model}|default`;
+    const key = `${it.vendor}|${it.model}|${it.groupName}`;
+    seenKeys.add(key);
     const ex = byKey.get(key);
     if (!ex) {
       await pool.query(
-        "INSERT INTO platform_prices (platformId, vendor, model, groupName, ratio, shortCost, longCost) VALUES (?, ?, ?, 'default', ?, ?, ?)",
-        [platformId, it.vendor, it.model, it.ratio, it.shortCost, it.longCost],
+        "INSERT INTO platform_prices (platformId, vendor, model, groupName, ratio, shortCost, longCost, source, collectedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+        [platformId, it.vendor, it.model, it.groupName, it.ratio, it.shortCost, it.longCost, it.source],
       );
       inserted++;
     } else if (
@@ -426,14 +454,37 @@ async function upsertPrices(pool, platformId, items) {
       String(ex.shortCost) !== String(it.shortCost) ||
       String(ex.longCost) !== String(it.longCost)
     ) {
-      await pool.query(
-        "UPDATE platform_prices SET ratio = ?, shortCost = ?, longCost = ? WHERE id = ?",
-        [it.ratio, it.shortCost, it.longCost, ex.id],
-      );
+      // 突变检测：旧倍率 >0 且相对变化超 30% 标记复核
+      const oldR = Number(ex.ratio), newR = Number(it.ratio);
+      const mutated = oldR > 0 && Math.abs(newR - oldR) / oldR > 0.3;
+      if (mutated) {
+        await pool.query(
+          "UPDATE platform_prices SET ratio = ?, shortCost = ?, longCost = ?, source = ?, collectedAt = NOW(), prevRatio = ?, ratioChangedAt = NOW(), needReview = 1 WHERE id = ?",
+          [it.ratio, it.shortCost, it.longCost, it.source, ex.ratio, ex.id],
+        );
+        flagged++;
+      } else {
+        await pool.query(
+          "UPDATE platform_prices SET ratio = ?, shortCost = ?, longCost = ?, source = ?, collectedAt = NOW() WHERE id = ?",
+          [it.ratio, it.shortCost, it.longCost, it.source, ex.id],
+        );
+      }
       updated++;
+    } else {
+      // 价格未变也要刷新采集时间（证明数据新鲜）
+      await pool.query("UPDATE platform_prices SET collectedAt = NOW() WHERE id = ?", [ex.id]);
     }
   }
-  return { inserted, updated };
+  // 失效清理：本次官网未返回的（模型,组）价格删除
+  let removed = 0;
+  for (const r of existing) {
+    const key = `${r.vendor}|${r.model}|${r.groupName}`;
+    if (!seenKeys.has(key)) {
+      await pool.query("DELETE FROM platform_prices WHERE id = ?", [r.id]);
+      removed++;
+    }
+  }
+  return { inserted, updated, flagged, removed };
 }
 
 async function collectAllPrices(pool) {
@@ -446,19 +497,21 @@ async function collectAllPrices(pool) {
     [plats.length],
   );
   const runId = runRes.insertId;
-  let ok = 0, totalItems = 0, insertedTotal = 0, updatedTotal = 0;
+  let ok = 0, totalItems = 0, insertedTotal = 0, updatedTotal = 0, flaggedTotal = 0, removedTotal = 0;
   const CHUNK = 10;
   for (let i = 0; i < plats.length; i += CHUNK) {
     await Promise.allSettled(
       plats.slice(i, i + CHUNK).map(async (p) => {
         const items = await fetchPlatformPrices(p);
         if (!items) return;
-        const { inserted, updated } = await upsertPrices(pool, p.id, items);
+        const { inserted, updated, flagged, removed } = await upsertPrices(pool, p.id, items);
         ok++;
         totalItems += items.length;
         insertedTotal += inserted;
         updatedTotal += updated;
-        console.log(`[pricing] ${p.name}: ${items.length} 个模型（新增 ${inserted} 更新 ${updated}）`);
+        flaggedTotal += flagged;
+        removedTotal += removed;
+        console.log(`[pricing] ${p.name}: ${items.length} 条价格（新增 ${inserted} 更新 ${updated} 突变 ${flagged} 清理 ${removed}）`);
       }),
     );
   }
@@ -468,7 +521,7 @@ async function collectAllPrices(pool) {
     [
       ok,
       plats.length - ok,
-      `站点:${ok}/${plats.length} 模型:${totalItems} 新增:${insertedTotal} 更新:${updatedTotal}`,
+      `站点:${ok}/${plats.length} 价格:${totalItems} 新增:${insertedTotal} 更新:${updatedTotal} 突变待复核:${flaggedTotal} 失效清理:${removedTotal}`,
       runId,
     ],
   );

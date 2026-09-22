@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/providers/trpc";
-import { fmtLatency, vendorColor } from "@/lib/format";
+import { fmtLatency, vendorColor, timeAgo } from "@/lib/format";
 import { toast } from "sonner";
 
 type SortKey = "ratioAsc" | "ratioDesc" | "latencyAsc" | "uptimeDesc";
@@ -33,6 +33,11 @@ export default function Pricing() {
     if (!q) return models;
     return models.filter((m) => m.toLowerCase().includes(q));
   }, [models, modelQuery]);
+  // 当前模型的真实可用价格组（来自官网采集的目录）
+  const modelGroups = useMemo(() => {
+    if (!model) return [] as string[];
+    return catalog?.find((c) => c.vendor === vendor)?.groups?.[model] ?? [];
+  }, [catalog, vendor, model]);
 
   useEffect(() => {
     if (!vendor && vendors.length > 0) setVendor(vendors[0]);
@@ -40,6 +45,10 @@ export default function Pricing() {
   useEffect(() => {
     if (models.length > 0 && !models.includes(model)) setModel(models[0]);
   }, [models, model]);
+  // 模型切换时，价格组重置为该模型实际开放的第一组（default 优先）
+  useEffect(() => {
+    if (modelGroups.length > 0 && !modelGroups.includes(groupName)) setGroupName(modelGroups[0]);
+  }, [modelGroups, groupName]);
   // 切换供应商时清空模型搜索词
   useEffect(() => {
     setModelQuery("");
@@ -179,7 +188,7 @@ export default function Pricing() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground w-12">价格组</span>
-          {["default", "vip"].map((g) => (
+          {(modelGroups.length > 0 ? modelGroups : ["default"]).map((g) => (
             <Button
               key={g}
               size="sm"
@@ -187,10 +196,13 @@ export default function Pricing() {
               className="border"
               onClick={() => setGroupName(g)}
             >
-              {g === "default" ? "缺省用户组" : "VIP 组"}
+              {g === "default" ? "缺省用户组" : g}
             </Button>
           ))}
         </div>
+        <p className="text-[11px] text-muted-foreground">
+          价格来自各站官网公开接口（new-api/one-api），按模型实际开放的用户组计价；不同分组价格不同，最终以站点官网为准。
+        </p>
       </div>
 
       <div className="flex items-baseline gap-2">
@@ -209,6 +221,7 @@ export default function Pricing() {
               <th className="p-3 font-medium">{sortBtn(sort === "ratioAsc" ? "ratioDesc" : "ratioAsc", "实际人民币倍率")}</th>
               <th className="p-3 font-medium text-muted-foreground">预估短文花费</th>
               <th className="p-3 font-medium text-muted-foreground">预估长文花费</th>
+              <th className="p-3 font-medium text-muted-foreground">采集时间</th>
               <th className="p-3 font-medium">{sortBtn("latencyAsc", "操作")}</th>
             </tr>
           </thead>
@@ -216,12 +229,12 @@ export default function Pricing() {
             {isLoading ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i} className="border-b">
-                  <td className="p-3" colSpan={6}><Skeleton className="h-6" /></td>
+                  <td className="p-3" colSpan={7}><Skeleton className="h-6" /></td>
                 </tr>
               ))
             ) : data?.items.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-10 text-center text-muted-foreground">
+                <td colSpan={7} className="p-10 text-center text-muted-foreground">
                   该模型在当前价格组下暂无站点数据
                 </td>
               </tr>
@@ -246,6 +259,9 @@ export default function Pricing() {
                   </td>
                   <td className="p-3">￥{Number(it.shortCost).toFixed(3)} / 次</td>
                   <td className="p-3">￥{Number(it.longCost).toFixed(3)} / 次</td>
+                  <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
+                    {it.collectedAt ? `更新于 ${timeAgo(it.collectedAt)}` : "—"}
+                  </td>
                   <td className="p-3">
                     <div className="flex gap-1.5">
                       <Button size="sm" variant="outline" onClick={() => visit.mutate({ platformId: it.platformId })}>

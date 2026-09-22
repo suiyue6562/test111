@@ -9,21 +9,39 @@ function pad(n: number) {
 }
 
 export const pricingRouter = createRouter({
-  /** 可选模型目录 */
+  /** 可选模型目录（含每个模型的真实可用价格组，来自官网采集） */
   catalog: publicQuery.query(async () => {
     const db = getDb();
     const rows = await db
-      .selectDistinct({ vendor: platformPrices.vendor, model: platformPrices.model })
+      .selectDistinct({
+        vendor: platformPrices.vendor,
+        model: platformPrices.model,
+        groupName: platformPrices.groupName,
+      })
       .from(platformPrices);
     const map = new Map<string, string[]>();
+    const groupMap = new Map<string, string[]>();
     for (const r of rows) {
       const arr = map.get(r.vendor) ?? [];
-      arr.push(r.model);
+      if (!arr.includes(r.model)) arr.push(r.model);
       map.set(r.vendor, arr);
+      const gk = `${r.vendor}|${r.model}`;
+      const garr = groupMap.get(gk) ?? [];
+      garr.push(r.groupName);
+      groupMap.set(gk, garr);
     }
     return Array.from(map.entries()).map(([vendor, models]) => ({
       vendor,
       models: models.sort(),
+      // 每个模型的可用组（default 优先），前端价格组筛选用
+      groups: Object.fromEntries(
+        models.map((m) => {
+          const gs = (groupMap.get(`${vendor}|${m}`) ?? []).sort((a, b) =>
+            a === "default" ? -1 : b === "default" ? 1 : a.localeCompare(b),
+          );
+          return [m, gs];
+        }),
+      ),
     }));
   }),
 
@@ -82,6 +100,7 @@ export const pricingRouter = createRouter({
           ratio: pr.ratio,
           shortCost: pr.shortCost,
           longCost: pr.longCost,
+          collectedAt: pr.collectedAt,
           uptime,
           avgLatency,
         };

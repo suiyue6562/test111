@@ -190,6 +190,25 @@ export default function Admin() {
     enabled: user?.role === "admin",
     refetchInterval: 60_000,
   });
+  const { data: priceReviews } = trpc.admin.priceReviewList.useQuery(undefined, {
+    enabled: user?.role === "admin",
+    refetchInterval: 60_000,
+  });
+  const { data: priceMissing } = trpc.admin.priceMissingSites.useQuery(undefined, {
+    enabled: user?.role === "admin",
+  });
+  const { data: priceFresh } = trpc.admin.priceFreshness.useQuery(undefined, {
+    enabled: user?.role === "admin",
+    refetchInterval: 60_000,
+  });
+  const resolvePrice = trpc.admin.priceReviewResolve.useMutation({
+    onSuccess: () => { invalidateAll(); toast.success("已确认"); },
+    onError: (e) => toast.error(e.message),
+  });
+  const resolveAllPrices = trpc.admin.priceReviewResolveAll.useMutation({
+    onSuccess: () => { invalidateAll(); toast.success("已全部确认"); },
+    onError: (e) => toast.error(e.message),
+  });
 
   const [editOpen, setEditOpen] = useState(false);
   const [editPlat, setEditPlat] = useState<(typeof plats extends (infer T)[] | undefined ? T : never) | null>(null);
@@ -289,6 +308,9 @@ export default function Admin() {
           <TabsTrigger value="acts">活动管理</TabsTrigger>
           <TabsTrigger value="users">用户管理</TabsTrigger>
           <TabsTrigger value="collector">采集监控</TabsTrigger>
+          <TabsTrigger value="pricereview">
+            价格复核{priceReviews && priceReviews.length > 0 ? `（${priceReviews.length}）` : ""}
+          </TabsTrigger>
           <TabsTrigger value="adstats">广告效果</TabsTrigger>
         </TabsList>
 
@@ -630,6 +652,127 @@ export default function Admin() {
                     <TableCell className="text-xs">{Number(p.score).toFixed(1)}</TableCell>
                   </TableRow>
                 ))}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        {/* 价格复核 */}
+        <TabsContent value="pricereview" className="pt-4 space-y-4">
+          {/* 新鲜度总览 */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {[
+              { label: "价格记录", value: priceFresh?.total },
+              { label: "覆盖站点", value: priceFresh?.platformsWithPrice },
+              { label: "待复核突变", value: priceFresh?.needReview },
+              { label: "超24h未更新", value: priceFresh?.stale24h },
+              { label: "最近采集", value: priceFresh?.latestAt ? fmtDateTime(priceFresh.latestAt) : "—" },
+            ].map((s) => (
+              <div key={s.label} className="rounded-xl border bg-card p-3">
+                <div className="text-xs text-muted-foreground">{s.label}</div>
+                <div className="text-lg font-bold mt-0.5 truncate">{s.value ?? "…"}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* 突变待复核 */}
+          <div className="rounded-xl border bg-card p-4 overflow-x-auto">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-medium">
+                价格突变待复核
+                <span className="text-xs text-muted-foreground ml-2">采集器自动标记：倍率变化 &gt;30%，请对照官网确认</span>
+              </div>
+              {priceReviews && priceReviews.length > 0 && (
+                <Button size="sm" variant="outline" onClick={() => resolveAllPrices.mutate()}>
+                  全部确认
+                </Button>
+              )}
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>站点</TableHead>
+                  <TableHead>模型 / 组</TableHead>
+                  <TableHead>旧倍率</TableHead>
+                  <TableHead>新倍率</TableHead>
+                  <TableHead>变化</TableHead>
+                  <TableHead>时间</TableHead>
+                  <TableHead>操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(priceReviews ?? []).map((r) => {
+                  const oldR = Number(r.prevRatio ?? 0);
+                  const newR = Number(r.ratio);
+                  const pct = oldR > 0 ? Math.round(((newR - oldR) / oldR) * 100) : null;
+                  return (
+                    <TableRow key={r.id}>
+                      <TableCell>
+                        <a href={r.platformDomain ? `/site/${r.platformDomain}` : "#"} className="hover:text-indigo-600">
+                          {r.platformName}
+                        </a>
+                        <div className="text-xs text-muted-foreground">{r.platformDomain}</div>
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-mono text-xs">{r.model}</span>
+                        <span className="text-xs text-muted-foreground ml-1">/{r.groupName}</span>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{oldR.toFixed(4)}x</TableCell>
+                      <TableCell className="font-mono text-xs font-semibold">{newR.toFixed(4)}x</TableCell>
+                      <TableCell>
+                        {pct != null && (
+                          <span className={pct > 0 ? "text-rose-500 text-xs font-medium" : "text-emerald-600 text-xs font-medium"}>
+                            {pct > 0 ? "+" : ""}{pct}%
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{r.ratioChangedAt ? fmtDateTime(r.ratioChangedAt) : "—"}</TableCell>
+                      <TableCell>
+                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => resolvePrice.mutate({ id: r.id })}>
+                          确认无误
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {(!priceReviews || priceReviews.length === 0) && (
+                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">暂无待复核记录，价格稳定</TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* 无价格站点 */}
+          <div className="rounded-xl border bg-card p-4 overflow-x-auto">
+            <div className="text-sm font-medium mb-1">
+              未采到价格的站点（{(priceMissing ?? []).length}）
+              <span className="text-xs text-muted-foreground ml-2">站点正常但无公开价格接口，可人工核实其价格页后手动录入</span>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>站点</TableHead>
+                  <TableHead>域名</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(priceMissing ?? []).slice(0, 50).map((s) => (
+                  <TableRow key={s.id}>
+                      <TableCell>{s.name}</TableCell>
+                      <TableCell className="font-mono text-xs">{s.domain}</TableCell>
+                      <TableCell className="text-xs">{s.status === "operational" ? "正常" : "偏慢"}</TableCell>
+                      <TableCell>
+                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setPricePlat(s.id)}>
+                          录入价格
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                {(!priceMissing || priceMissing.length === 0) && (
+                  <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-8">全部存活站点均已采到价格</TableCell></TableRow>
+                )}
               </TableBody>
             </Table>
           </div>

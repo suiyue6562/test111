@@ -636,6 +636,81 @@ export const adminRouter = createRouter({
       return { success: true };
     }),
 
+  // ---------- 价格复核 ----------
+  /** 价格突变待复核列表（采集器自动标记：倍率变化 >30%） */
+  priceReviewList: adminQuery.query(async () => {
+    const rows = await getDb()
+      .select({
+        id: platformPrices.id,
+        platformId: platformPrices.platformId,
+        vendor: platformPrices.vendor,
+        model: platformPrices.model,
+        groupName: platformPrices.groupName,
+        ratio: platformPrices.ratio,
+        prevRatio: platformPrices.prevRatio,
+        ratioChangedAt: platformPrices.ratioChangedAt,
+        collectedAt: platformPrices.collectedAt,
+        source: platformPrices.source,
+        platformName: platforms.name,
+        platformDomain: platforms.domain,
+      })
+      .from(platformPrices)
+      .innerJoin(platforms, eq(platforms.id, platformPrices.platformId))
+      .where(eq(platformPrices.needReview, 1))
+      .orderBy(desc(platformPrices.ratioChangedAt))
+      .limit(200);
+    return rows;
+  }),
+
+  /** 确认复核：清除突变标记 */
+  priceReviewResolve: adminQuery
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      await getDb().update(platformPrices).set({ needReview: 0 }).where(eq(platformPrices.id, input.id));
+      return { success: true };
+    }),
+
+  /** 全部确认 */
+  priceReviewResolveAll: adminQuery.mutation(async () => {
+    await getDb().update(platformPrices).set({ needReview: 0 }).where(eq(platformPrices.needReview, 1));
+    return { success: true };
+  }),
+
+  /** 无价格站点列表：正常运营但未采到价格，便于人工跟进补充 */
+  priceMissingSites: adminQuery.query(async () => {
+    return getDb()
+      .select({
+        id: platforms.id,
+        name: platforms.name,
+        domain: platforms.domain,
+        url: platforms.url,
+        status: platforms.status,
+      })
+      .from(platforms)
+      .where(
+        and(
+          inArray(platforms.status, ["operational", "slow"]),
+          sql`${platforms.id} NOT IN (SELECT DISTINCT platformId FROM platform_prices)`,
+        ),
+      )
+      .orderBy(desc(platforms.score))
+      .limit(200);
+  }),
+
+  /** 价格数据新鲜度总览 */
+  priceFreshness: adminQuery.query(async () => {
+    const [r] = await getDb()
+      .select({
+        total: sql<number>`count(*)`,
+        platformsWithPrice: sql<number>`count(distinct ${platformPrices.platformId})`,
+        needReview: sql<number>`sum(${platformPrices.needReview})`,
+        latestAt: sql<string>`max(${platformPrices.collectedAt})`,
+        stale24h: sql<number>`sum(case when ${platformPrices.collectedAt} < date_sub(now(), interval 24 hour) or ${platformPrices.collectedAt} is null then 1 else 0 end)`,
+      })
+      .from(platformPrices);
+    return r;
+  }),
+
   // ---------- 用户管理 ----------
   listUsers: adminQuery.query(async () => {
     return getDb()
