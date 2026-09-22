@@ -43871,6 +43871,7 @@ __export(schema_exports, {
   forumCategories: () => forumCategories,
   forumComments: () => forumComments,
   forumPosts: () => forumPosts,
+  modelProfiles: () => modelProfiles,
   platformDailyStatus: () => platformDailyStatus,
   platformPrices: () => platformPrices,
   platformProbes: () => platformProbes,
@@ -48167,6 +48168,18 @@ var platformPrices = mysqlTable(
     platformIdx: index("price_platform_idx").on(t2.platformId)
   })
 );
+var modelProfiles = mysqlTable("model_profiles", {
+  label: varchar("label", { length: 64 }).primaryKey(),
+  // canonical 模型名，如 "Claude Sonnet 4.5"
+  family: varchar("family", { length: 32 }).notNull(),
+  blurb: text("blurb"),
+  // AI 生成的模型介绍
+  tags: json2("tags").$type(),
+  // 能力标签：推理/编码/长上下文 等
+  sellers: int2("sellers").default(0).notNull(),
+  // 在售站点数快照
+  updatedAt: timestamp("updatedAt").defaultNow().notNull()
+});
 var reviews = mysqlTable(
   "reviews",
   {
@@ -51164,6 +51177,153 @@ var pricingRouter = createRouter({
         cheaperThanSecond: second && second.e > 0 ? Math.round((second.e - minV.e) / second.e * 100) : null
       };
     }).filter((x) => x !== null);
+  }),
+  /**
+   * 热门模型 tab 列表：canonical 模型按在售站数排序，附 AI 档案（blurb/tags）
+   * 排行榜页顶部模型切换用
+   */
+  hotModels: publicQuery.input(external_exports.object({ limit: external_exports.number().min(1).max(60).default(40) }).optional()).query(async ({ input }) => {
+    const db = getDb();
+    const rows = await db.selectDistinct({ model: platformPrices.model, platformId: platformPrices.platformId }).from(platformPrices);
+    const byLabel = /* @__PURE__ */ new Map();
+    for (const r of rows) {
+      const c = canonicalModel(r.model);
+      if (!c) continue;
+      const e = byLabel.get(c.label) ?? { label: c.label, family: c.family, sellers: /* @__PURE__ */ new Set() };
+      e.sellers.add(r.platformId);
+      byLabel.set(c.label, e);
+    }
+    const profiles = await db.select().from(modelProfiles);
+    const profOf = new Map(profiles.map((p) => [p.label, p]));
+    return [...byLabel.values()].map((e) => ({
+      label: e.label,
+      family: e.family,
+      sellers: e.sellers.size,
+      blurb: profOf.get(e.label)?.blurb ?? null,
+      tags: profOf.get(e.label)?.tags ?? []
+    })).sort((a, b) => b.sellers - a.sellers).slice(0, input?.limit ?? 40);
+  }),
+  /**
+   * 模型排行榜：AI 推荐分 + 广告主投放双重排序。
+   * 精选排序 = 广告位（isAd 未过期，adWeight 降序，最多 3 个标「广告」）在前，其余按 AI score 降序。
+   * 每站含：有效价（default 组优先）、价格趋势（30 天内 ratio 变化幅度）、30 天在线率、延迟、AI 推荐分。
+   */
+  leaderboard: publicQuery.input(
+    external_exports.object({
+      model: external_exports.string(),
+      // canonical label
+      sort: external_exports.enum(["featured", "ratioAsc", "uptimeDesc", "latencyAsc"]).default("featured"),
+      onlyConfirmed: external_exports.boolean().default(false)
+      // 仅已实测
+    })
+  ).query(async ({ input }) => {
+    const db = getDb();
+    const distinct = await db.selectDistinct({ model: platformPrices.model }).from(platformPrices);
+    const variants = distinct.map((d) => d.model).filter((m) => canonicalModel(m)?.label === input.model);
+    if (variants.length === 0) return { profile: null, stats: null, total: 0, items: [] };
+    const prices = await db.select().from(platformPrices).where(inArray(platformPrices.model, variants));
+    if (prices.length === 0) return { profile: null, stats: null, total: 0, items: [] };
+    const effOf = (r) => {
+      const ratio = Number(r.ratio);
+      if (ratio > 0) return { e: ratio, isRatio: true };
+      const c = Number(r.shortCost);
+      return c > 0 ? { e: c, isRatio: false } : null;
+    };
+    const rowsByPlat = /* @__PURE__ */ new Map();
+    for (const r of prices) {
+      const arr = rowsByPlat.get(r.platformId) ?? [];
+      arr.push(r);
+      rowsByPlat.set(r.platformId, arr);
+    }
+    const bestByPlat = /* @__PURE__ */ new Map();
+    for (const [pid, rows] of rowsByPlat) {
+      const defaults = rows.filter((r) => r.groupName === "default");
+      const pool2 = defaults.length > 0 ? defaults : rows;
+      let best = null;
+      for (const r of pool2) {
+        const v = effOf(r);
+        if (!v) continue;
+        if (!best || v.e < best.e) best = { row: r, ...v };
+      }
+      if (best) bestByPlat.set(pid, best);
+    }
+    const plats = await db.select().from(platforms).where(inArray(platforms.id, [...bestByPlat.keys()]));
+    const platOf = new Map(plats.map((p) => [p.id, p]));
+    const since = /* @__PURE__ */ new Date();
+    since.setDate(since.getDate() - 29);
+    const sinceStr = `${since.getFullYear()}-${pad2(since.getMonth() + 1)}-${pad2(since.getDate())}`;
+    const trendSince = /* @__PURE__ */ new Date();
+    trendSince.setDate(trendSince.getDate() - 30);
+    const stats = await db.select().from(platformDailyStatus).where(inArray(platformDailyStatus.platformId, plats.map((p) => p.id)));
+    let items = [...bestByPlat.values()].flatMap(({ row: pr, e, isRatio }) => {
+      const plat = platOf.get(pr.platformId);
+      if (!plat || plat.status === "down" || plat.stage === "closed") return [];
+      if (input.onlyConfirmed && !plat.apiConfirmed) return [];
+      const days = stats.filter(
+        (s) => s.platformId === pr.platformId && s.date >= sinceStr && s.status !== "nodata"
+      );
+      const ok = days.filter((d) => d.status === "ok").length;
+      const uptime = days.length > 0 ? ok / days.length * 100 : null;
+      const lat = days.filter((d) => d.latencyMs != null);
+      const avgLatency = lat.length > 0 ? Math.round(lat.reduce((a, b) => a + (b.latencyMs ?? 0), 0) / lat.length) : null;
+      let priceTrend = null;
+      const ratio = Number(pr.ratio);
+      const prev = pr.prevRatio != null ? Number(pr.prevRatio) : null;
+      if (pr.ratioChangedAt && pr.ratioChangedAt >= trendSince && prev && prev > 0 && ratio > 0) {
+        priceTrend = Math.round((ratio - prev) / prev * 100);
+      }
+      const adActive = plat.isAd && (!plat.adExpireAt || plat.adExpireAt > /* @__PURE__ */ new Date());
+      return [{
+        platformId: plat.id,
+        name: plat.name,
+        domain: plat.domain,
+        url: plat.url,
+        aiTags: plat.aiTags ?? [],
+        variant: pr.model,
+        groupName: pr.groupName,
+        eff: e,
+        isRatio,
+        collectedAt: pr.collectedAt,
+        priceTrend,
+        uptime,
+        avgLatency,
+        score: Number(plat.score),
+        apiConfirmed: plat.apiConfirmed,
+        adActive,
+        adWeight: plat.adWeight
+      }];
+    });
+    switch (input.sort) {
+      case "ratioAsc":
+        items.sort((a, b) => a.eff - b.eff);
+        break;
+      case "uptimeDesc":
+        items.sort((a, b) => (b.uptime ?? -1) - (a.uptime ?? -1));
+        break;
+      case "latencyAsc":
+        items.sort((a, b) => (a.avgLatency ?? Infinity) - (b.avgLatency ?? Infinity));
+        break;
+      default: {
+        const ads = items.filter((x) => x.adActive).sort((a, b) => b.adWeight - a.adWeight).slice(0, 3);
+        const rest = items.filter((x) => !ads.includes(x)).sort((a, b) => b.score - a.score);
+        items = [...ads, ...rest];
+      }
+    }
+    const profiles = await db.select().from(modelProfiles);
+    const profile = profiles.find((p) => p.label === input.model) ?? null;
+    const uptimes = items.map((x) => x.uptime).filter((x) => x != null);
+    const ratioEffs = items.filter((x) => x.isRatio).map((x) => x.eff);
+    return {
+      profile: profile ? { blurb: profile.blurb, tags: profile.tags ?? [], family: profile.family } : null,
+      stats: {
+        sellers: items.length,
+        avgUptime: uptimes.length > 0 ? Math.round(uptimes.reduce((a, b) => a + b, 0) / uptimes.length) : null,
+        minEff: ratioEffs.length > 0 ? Math.min(...ratioEffs) : null,
+        maxEff: ratioEffs.length > 0 ? Math.max(...ratioEffs) : null
+      },
+      total: items.length,
+      items
+    };
   }),
   /**
    * 同站比价：该站每个模型在全网的价格排名

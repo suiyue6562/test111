@@ -160,6 +160,16 @@ export const platformPrices = mysqlTable(
 
 export type PlatformPrice = typeof platformPrices.$inferSelect;
 
+// ---------- 模型档案（AI 生成：简介+能力标签） ----------
+export const modelProfiles = mysqlTable("model_profiles", {
+  label: varchar("label", { length: 64 }).primaryKey(), // canonical 模型名，如 "Claude Sonnet 4.5"
+  family: varchar("family", { length: 32 }).notNull(),
+  blurb: text("blurb"), // AI 生成的模型介绍
+  tags: json("tags").$type<string[]>(), // 能力标签：推理/编码/长上下文 等
+  sellers: int("sellers").default(0).notNull(), // 在售站点数快照
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
 // ---------- 站点点评 ----------
 export const reviews = mysqlTable(
   "reviews",

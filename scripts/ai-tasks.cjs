@@ -62,6 +62,57 @@ function parseJsonObject(text) {
   try { return JSON.parse(m[0]); } catch { return null; }
 }
 
+/** canonical 模型归一化（与 api/pricing-router.ts 的规则保持一致） */
+function canonicalModel(raw) {
+  let s = String(raw).toLowerCase().trim();
+  s = s.replace(/^[a-z0-9_.-]+\//, "");
+  s = s.replace(/:.*$/, "");
+  s = s.replace(/-20\d{2}-?\d{2}-?\d{2}$/, "");
+  s = s.replace(/-(latest|preview|beta|exp|stable)$/, "");
+  let m;
+  if ((m = s.match(/^gpt-(5(?:\.\d+)?|4o|4\.1)(-mini|-nano|-pro)?$/)))
+    return { label: `GPT-${m[1]}${m[2] ? m[2].replace("-", " ") : ""}`, family: "OpenAI" };
+  if ((m = s.match(/^gpt-(5(?:\.\d+)?)-codex(-mini|-max)?$/)) || (m = s.match(/^codex(-mini)?$/))) {
+    const base = s.startsWith("codex") ? "Codex" : `GPT-${m[1]} Codex`;
+    const suffix = m[2] ? m[2].replace("-", " ") : "";
+    return { label: `${base}${suffix ? ` ${suffix}` : ""}`, family: "OpenAI" };
+  }
+  if ((m = s.match(/^o[34](-mini|-pro)?$/)))
+    return { label: m[0].replace("-mini", " mini").replace("-pro", " pro"), family: "OpenAI" };
+  if ((m = s.match(/^claude-(opus|sonnet|haiku)-(\d+)(?:[.-](\d+))?$/))) {
+    const kind = m[1][0].toUpperCase() + m[1].slice(1);
+    return { label: `Claude ${kind} ${m[3] ? `${m[2]}.${m[3]}` : m[2]}`, family: "Claude" };
+  }
+  if ((m = s.match(/^claude-3[.-]([57])-(opus|sonnet|haiku)$/))) {
+    const kind = m[2][0].toUpperCase() + m[2].slice(1);
+    return { label: `Claude 3.${m[1]} ${kind}`, family: "Claude" };
+  }
+  if ((m = s.match(/^gemini-(\d+(?:\.\d+)?)-(pro|flash)(-lite)?$/)))
+    return { label: `Gemini ${m[1]} ${m[2][0].toUpperCase() + m[2].slice(1)}${m[3] ? " Lite" : ""}`, family: "Gemini" };
+  if ((m = s.match(/^deepseek-(chat|reasoner)$/)))
+    return { label: m[1] === "chat" ? "DeepSeek V3" : "DeepSeek R1", family: "DeepSeek" };
+  if ((m = s.match(/^deepseek-(v3|r1)(\.\d+)?$/)))
+    return { label: `DeepSeek ${m[1].toUpperCase()}`, family: "DeepSeek" };
+  if ((m = s.match(/^qwen3?-(max|plus|turbo|flash)$/))) {
+    const v = s.startsWith("qwen3") ? "Qwen3" : "Qwen";
+    return { label: `${v} ${m[1][0].toUpperCase() + m[1].slice(1)}`, family: "Qwen" };
+  }
+  if (/^kimi-k2/.test(s)) return { label: "Kimi K2", family: "Kimi" };
+  if ((m = s.match(/^glm-(\d+(?:\.\d+)?)(-air|-flash|-plus)?$/)))
+    return { label: `GLM-${m[1]}${m[2] ? m[2].replace("-", " ") : ""}`, family: "GLM" };
+  if ((m = s.match(/^grok-(\d+(?:\.\d+)?)(-mini|-fast|-heavy)?$/)))
+    return { label: `Grok ${m[1]}${m[2] ? m[2].replace("-", " ") : ""}`, family: "xAI" };
+  if ((m = s.match(/^doubao-(pro|lite|seed)/)))
+    return { label: `豆包 ${m[1][0].toUpperCase() + m[1].slice(1)}`, family: "豆包" };
+  if (/^minimax-(m[23]|abab)/.test(s)) {
+    const mm = s.match(/m[23](?:\.\d+)?/);
+    return { label: `MiniMax ${mm ? mm[0].toUpperCase() : "M"}`, family: "MiniMax" };
+  }
+  if (/^hunyuan-(large|pro|standard|turbo)/.test(s))
+    return { label: "混元 " + s.replace(/^hunyuan-/, "").replace(/^\w/, (c) => c.toUpperCase()), family: "混元" };
+  return null;
+}
+
 /** 价格突变 AI 复核：自动确认合理调价，可疑的保留人工复核 */
 async function reviewPriceMutations(pool) {
   const [rows] = await pool.query(
@@ -171,6 +222,110 @@ async function summarizePlatforms(pool, limit = 150) {
   return { total: plats.length, done, failed };
 }
 
+/** AI 站点推荐打分：批量评估，写 platforms.score（0-100），排行榜「精选」排序用 */
+async function scorePlatforms(pool, limit = 40) {
+  const [plats] = await pool.query(
+    `SELECT p.id, p.name, p.apiConfirmed, p.visitCount, p.stage,
+       (SELECT COUNT(DISTINCT model) FROM platform_prices WHERE platformId = p.id) AS models,
+       (SELECT MIN(ratio) FROM platform_prices WHERE platformId = p.id AND ratio > 0) AS minRatio,
+       (SELECT AVG(rating) FROM reviews WHERE platformId = p.id AND status = 'published') AS avgRating,
+       (SELECT COUNT(*) FROM reviews WHERE platformId = p.id AND status = 'published') AS reviewCount
+     FROM platforms p
+     WHERE p.status IN ('operational','slow')
+     ORDER BY (p.score = 0) DESC, p.visitCount DESC
+     LIMIT ?`,
+    [limit],
+  );
+  if (plats.length === 0) return { total: 0, done: 0 };
+  // 30 天可用率与延迟
+  const ids = plats.map((p) => p.id);
+  const [stats] = await pool.query(
+    `SELECT platformId,
+       COUNT(CASE WHEN status != 'nodata' THEN 1 END) AS measured,
+       COUNT(CASE WHEN status = 'ok' THEN 1 END) AS ok,
+       AVG(CASE WHEN latencyMs IS NOT NULL AND status != 'nodata' THEN latencyMs END) AS avgLat
+     FROM platform_daily_status
+     WHERE platformId IN (${ids.map(() => "?").join(",")}) AND date >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
+     GROUP BY platformId`,
+    ids,
+  );
+  const statOf = new Map(stats.map((s) => [Number(s.platformId), s]));
+  const list = plats.map((p) => {
+    const s = statOf.get(Number(p.id));
+    return {
+      id: Number(p.id), 站点: p.name,
+      可用率30天: s && Number(s.measured) > 0 ? `${((Number(s.ok) / Number(s.measured)) * 100).toFixed(0)}%` : "无数据",
+      平均延迟ms: s?.avgLat ? Math.round(Number(s.avgLat)) : "无数据",
+      模型数: Number(p.models), 最低倍率: p.minRatio ?? "无",
+      API实测: p.apiConfirmed ? "是" : "否",
+      用户评分: p.avgRating ? `${Number(p.avgRating).toFixed(1)}(${p.reviewCount}条)` : "无",
+      访问量: p.visitCount, 阶段: p.stage,
+    };
+  });
+  const out = await chat(
+    "你是 API 中转站导航站的推荐算法评审，输出必须是 JSON 数组，不要输出其他内容。",
+    `给以下站点打推荐分（0-100 整数）。权重导向：可用率和实测数据最重要，其次价格竞争力与用户口碑，访问量仅作参考；数据不足的站保守给分（40-55），表现全面优秀的站才给 85+。\n` +
+      `对每站输出 {"id":数字,"score":数字,"reason":"12字内中文"}。\n站点数据：\n${JSON.stringify(list)}`,
+    4000,
+  );
+  const scores = parseJsonArray(out);
+  if (!scores) return { total: plats.length, done: 0, parseError: true };
+  let done = 0;
+  for (const s of scores) {
+    const score = Math.max(0, Math.min(100, Math.round(Number(s.score))));
+    if (!Number.isFinite(score)) continue;
+    const r = await pool.query("UPDATE platforms SET score = ? WHERE id = ?", [score, Number(s.id)]);
+    if (r[0].affectedRows > 0) done++;
+  }
+  return { total: plats.length, done };
+}
+
+/** AI 模型档案：为热门 canonical 模型生成简介+能力标签（排行榜头卡用） */
+async function modelProfiles(pool, limit = 8) {
+  const [rows] = await pool.query(
+    `SELECT model, COUNT(DISTINCT platformId) AS sellers FROM platform_prices GROUP BY model`,
+  );
+  const byLabel = new Map();
+  for (const r of rows) {
+    const c = canonicalModel(r.model);
+    if (!c) continue;
+    const cur = byLabel.get(c.label) ?? { label: c.label, family: c.family, sellers: 0 };
+    cur.sellers += Number(r.sellers);
+    byLabel.set(c.label, cur);
+  }
+  const hot = [...byLabel.values()].sort((a, b) => b.sellers - a.sellers);
+  const [existing] = await pool.query("SELECT label FROM model_profiles");
+  const have = new Set(existing.map((e) => e.label));
+  const todo = hot.filter((h) => !have.has(h.label)).slice(0, limit);
+  if (todo.length === 0) {
+    // 更新在售站数快照
+    for (const h of hot.slice(0, 30)) {
+      await pool.query("UPDATE model_profiles SET sellers = ? WHERE label = ?", [h.sellers, h.label]);
+    }
+    return { total: 0, done: 0 };
+  }
+  const out = await chat(
+    "你是大模型领域的编辑，输出必须是 JSON 对象，不要输出其他内容。",
+    `为以下 AI 模型写档案。输出 JSON：{"模型名":{"blurb":"60字内中文介绍（定位与适用场景）","tags":["3-5个能力标签，如 推理/编码/长上下文/多模态/高性价比"]}}\n` +
+      `只写公认的模型特点，不确定就写通用描述。模型：\n${todo.map((t) => `${t.label}（${t.family}）`).join("\n")}`,
+    3000,
+  );
+  const parsed = parseJsonObject(out);
+  if (!parsed) return { total: todo.length, done: 0, parseError: true };
+  let done = 0;
+  for (const t of todo) {
+    const p = parsed[t.label];
+    if (!p?.blurb) continue;
+    const tags = Array.isArray(p.tags) ? p.tags.map((x) => String(x).slice(0, 8)).slice(0, 5) : [];
+    await pool.query(
+      "INSERT INTO model_profiles (label, family, blurb, tags, sellers) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE blurb = VALUES(blurb), tags = VALUES(tags), sellers = VALUES(sellers)",
+      [t.label, t.family, String(p.blurb).slice(0, 200), JSON.stringify(tags), t.sellers],
+    );
+    done++;
+  }
+  return { total: todo.length, done };
+}
+
 /** 数据健康巡检：异常价格聚集检测 */
 async function aiHealthCheck(pool) {
   const [[stats]] = await pool.query(
@@ -211,6 +366,10 @@ async function runAiTasks(pool) {
   if (review) details.push(`复核:${review.skipped ? "无待复核" : `${review.reviewed}条(自动确认${review.autoOk}/存疑${review.suspect})`}`);
   const summ = await safe("简介", () => summarizePlatforms(pool), null);
   if (summ) details.push(`简介:${summ.done}/${summ.total}生成`);
+  const score = await safe("打分", () => scorePlatforms(pool), null);
+  if (score) details.push(`打分:${score.done}/${score.total}`);
+  const mp = await safe("档案", () => modelProfiles(pool), null);
+  if (mp) details.push(`档案:${mp.done}/${mp.total}`);
   const health = await safe("巡检", () => aiHealthCheck(pool), null);
   if (health) details.push(`巡检:总${health.total} 负值${health.negative ?? 0} 极端${health.extreme ?? 0} 超48h${health.stale48h ?? 0} 待复核余${health.pendingReview ?? 0}`);
   await pool.query(
