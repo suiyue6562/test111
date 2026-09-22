@@ -67,6 +67,18 @@ async function main() {
     INDEX adc_position_idx (position)
   )`);
   console.log("[migrate] ad_campaigns 已就绪");
+
+  // ad_inquiries：广告合作申请（招商页表单）
+  await conn.query(`CREATE TABLE IF NOT EXISTS ad_inquiries (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(120) NOT NULL,
+    contact VARCHAR(200) NOT NULL,
+    positions JSON NOT NULL,
+    message TEXT,
+    status ENUM('pending','contacted','deal','closed') NOT NULL DEFAULT 'pending',
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+  console.log("[migrate] ad_inquiries 已就绪");
   await conn.end();
   console.log("[migrate] done");
 }

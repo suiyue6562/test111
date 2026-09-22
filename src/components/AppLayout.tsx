@@ -254,6 +254,7 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
             <Link to="/about" className="hover:text-foreground">关于我们</Link>
             <Link to="/guide" className="hover:text-foreground">新手指引</Link>
             <Link to="/sks" className="hover:text-foreground">站点入驻</Link>
+            <Link to="/advertise" className="hover:text-foreground">广告合作</Link>
             <Link to="/terms" className="hover:text-foreground">用户协议</Link>
             <Link to="/disclaimer" className="hover:text-foreground">风险声明</Link>
           </div>

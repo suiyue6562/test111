@@ -16,6 +16,7 @@ import {
   visitLogs,
   adImpressions,
   adCampaigns,
+  adInquiries,
 } from "@db/schema";
 import { getDb } from "./queries/connection";
 import { createRouter, adminQuery } from "./middleware";
@@ -620,6 +621,18 @@ export const adminRouter = createRouter({
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       await getDb().delete(adCampaigns).where(eq(adCampaigns.id, input.id));
+      return { success: true };
+    }),
+
+  /** 广告合作申请列表 */
+  listAdInquiries: adminQuery.query(async () => {
+    return getDb().select().from(adInquiries).orderBy(desc(adInquiries.createdAt)).limit(200);
+  }),
+
+  setAdInquiryStatus: adminQuery
+    .input(z.object({ id: z.number(), status: z.enum(["pending", "contacted", "deal", "closed"]) }))
+    .mutation(async ({ input }) => {
+      await getDb().update(adInquiries).set({ status: input.status }).where(eq(adInquiries.id, input.id));
       return { success: true };
     }),
 

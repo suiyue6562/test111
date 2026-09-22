@@ -17,6 +17,7 @@ import Login from "./pages/Login";
 import UserCenter from "./pages/UserCenter";
 import Admin from "./pages/Admin";
 import Guide from "./pages/Guide";
+import Advertise from "./pages/Advertise";
 import StaticPage from "./pages/StaticPage";
 import NotFound from "./pages/NotFound";
 
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/forum/t/:id" element={<ForumPost />} />
           <Route path="/me" element={<UserCenter />} />
           <Route path="/guide" element={<Guide />} />
+          <Route path="/advertise" element={<Advertise />} />
           <Route path="/about" element={<StaticPage page="about" />} />
           <Route path="/terms" element={<StaticPage page="terms" />} />
           <Route path="/disclaimer" element={<StaticPage page="disclaimer" />} />

@@ -9,6 +9,7 @@ import {
   visitLogs,
   adImpressions,
   adCampaigns,
+  adInquiries,
   users,
 } from "@db/schema";
 import { getDb } from "./queries/connection";
@@ -438,7 +439,94 @@ export const platformRouter = createRouter({
       return { recorded: true };
     }),
 
-  /** 区域广告位：顶部/底部/左侧/右侧/弹窗（故障站不展示） */
+  /** 招商页公开数据：站点规模 + 各广告位 7 天曝光/点击/占用 */
+  adPublicStats: publicQuery.query(async () => {
+    const db = getDb();
+    const since7 = new Date(Date.now() - 7 * 86400_000);
+
+    const [platCount] = await db.select({ n: sql<number>`count(*)` }).from(platforms);
+    const [visitCount] = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(visitLogs)
+      .where(sql`${visitLogs.createdAt} >= ${since7}`);
+    const [userCount] = await db.select({ n: sql<number>`count(*)` }).from(users);
+
+    // 内置位（首页/列表）占用
+    const liveAds = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(platforms)
+      .where(
+        and(
+          eq(platforms.isAd, true),
+          or(sql`${platforms.adExpireAt} IS NULL`, sql`${platforms.adExpireAt} > NOW()`),
+        ),
+      );
+    const builtInOccupied = Number(liveAds[0]?.n ?? 0);
+
+    // 区域位占用
+    const campRows = await db
+      .select({ position: adCampaigns.position, n: sql<number>`count(*)` })
+      .from(adCampaigns)
+      .where(or(sql`${adCampaigns.expireAt} IS NULL`, sql`${adCampaigns.expireAt} > NOW()`))
+      .groupBy(adCampaigns.position);
+    const campByPos = new Map(campRows.map((r) => [r.position, Number(r.n)]));
+
+    // 各位置 7 天曝光与点击
+    const imps = await db
+      .select({ position: adImpressions.position, n: sql<number>`count(*)` })
+      .from(adImpressions)
+      .where(sql`${adImpressions.createdAt} >= ${since7}`)
+      .groupBy(adImpressions.position);
+    const impByPos = new Map(imps.map((r) => [r.position, Number(r.n)]));
+    const clks = await db
+      .select({ source: visitLogs.source, n: sql<number>`count(*)` })
+      .from(visitLogs)
+      .where(and(sql`${visitLogs.createdAt} >= ${since7}`, sql`${visitLogs.source} IS NOT NULL`))
+      .groupBy(visitLogs.source);
+    const clkByPos = new Map(clks.map((r) => [String(r.source).replace(/^ad-/, ""), Number(r.n)]));
+
+    const zones = (["home", "list", ...ZONE_POSITIONS] as const).map((pos) => ({
+      position: pos,
+      capacity: pos === "home" || pos === "list" ? 3 : ZONE_LIMIT[pos],
+      occupied:
+        pos === "home" || pos === "list"
+          ? Math.min(builtInOccupied, 3)
+          : campByPos.get(pos) ?? 0,
+      imp7: impByPos.get(pos) ?? 0,
+      clk7: clkByPos.get(pos) ?? 0,
+    }));
+
+    return {
+      platforms: Number(platCount?.n ?? 0),
+      users: Number(userCount?.n ?? 0),
+      visits7d: Number(visitCount?.n ?? 0),
+      zones,
+    };
+  }),
+
+  /** 招商页：广告合作申请 */
+  submitAdInquiry: publicQuery
+    .input(
+      z.object({
+        name: z.string().min(1).max(120),
+        contact: z.string().min(3).max(200),
+        positions: z
+          .array(z.enum(["home", "list", "top", "bottom", "left", "right", "popup"]))
+          .min(1)
+          .max(7),
+        message: z.string().max(1000).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      await getDb().insert(adInquiries).values({
+        name: input.name,
+        contact: input.contact,
+        positions: input.positions,
+        message: input.message ?? "",
+      });
+      return { success: true };
+    }),
+
   zoneAds: publicQuery
     .input(z.object({ position: z.enum(["top", "bottom", "left", "right", "popup"]) }))
     .query(async ({ input }) => {

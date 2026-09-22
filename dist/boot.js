@@ -43865,6 +43865,7 @@ var schema_exports = {};
 __export(schema_exports, {
   adCampaigns: () => adCampaigns,
   adImpressions: () => adImpressions,
+  adInquiries: () => adInquiries,
   collectorRuns: () => collectorRuns,
   favorites: () => favorites,
   forumCategories: () => forumCategories,
@@ -48298,6 +48299,18 @@ var adCampaigns = mysqlTable(
     posIdx: index("adc_position_idx").on(t2.position)
   })
 );
+var adInquiries = mysqlTable("ad_inquiries", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  // 站点/品牌名
+  contact: varchar("contact", { length: 200 }).notNull(),
+  // 联系方式
+  positions: json2("positions").$type().notNull(),
+  // 意向位置
+  message: text("message"),
+  status: mysqlEnum("status", ["pending", "contacted", "deal", "closed"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull()
+});
 
 // node_modules/drizzle-orm/mysql2/driver.js
 var import_mysql2 = __toESM(require_mysql2(), 1);
@@ -50725,7 +50738,57 @@ var platformRouter = createRouter({
     });
     return { recorded: true };
   }),
-  /** 区域广告位：顶部/底部/左侧/右侧/弹窗（故障站不展示） */
+  /** 招商页公开数据：站点规模 + 各广告位 7 天曝光/点击/占用 */
+  adPublicStats: publicQuery.query(async () => {
+    const db = getDb();
+    const since7 = new Date(Date.now() - 7 * 864e5);
+    const [platCount] = await db.select({ n: sql`count(*)` }).from(platforms);
+    const [visitCount] = await db.select({ n: sql`count(*)` }).from(visitLogs).where(sql`${visitLogs.createdAt} >= ${since7}`);
+    const [userCount] = await db.select({ n: sql`count(*)` }).from(users);
+    const liveAds = await db.select({ n: sql`count(*)` }).from(platforms).where(
+      and(
+        eq(platforms.isAd, true),
+        or(sql`${platforms.adExpireAt} IS NULL`, sql`${platforms.adExpireAt} > NOW()`)
+      )
+    );
+    const builtInOccupied = Number(liveAds[0]?.n ?? 0);
+    const campRows = await db.select({ position: adCampaigns.position, n: sql`count(*)` }).from(adCampaigns).where(or(sql`${adCampaigns.expireAt} IS NULL`, sql`${adCampaigns.expireAt} > NOW()`)).groupBy(adCampaigns.position);
+    const campByPos = new Map(campRows.map((r) => [r.position, Number(r.n)]));
+    const imps = await db.select({ position: adImpressions.position, n: sql`count(*)` }).from(adImpressions).where(sql`${adImpressions.createdAt} >= ${since7}`).groupBy(adImpressions.position);
+    const impByPos = new Map(imps.map((r) => [r.position, Number(r.n)]));
+    const clks = await db.select({ source: visitLogs.source, n: sql`count(*)` }).from(visitLogs).where(and(sql`${visitLogs.createdAt} >= ${since7}`, sql`${visitLogs.source} IS NOT NULL`)).groupBy(visitLogs.source);
+    const clkByPos = new Map(clks.map((r) => [String(r.source).replace(/^ad-/, ""), Number(r.n)]));
+    const zones = ["home", "list", ...ZONE_POSITIONS].map((pos) => ({
+      position: pos,
+      capacity: pos === "home" || pos === "list" ? 3 : ZONE_LIMIT[pos],
+      occupied: pos === "home" || pos === "list" ? Math.min(builtInOccupied, 3) : campByPos.get(pos) ?? 0,
+      imp7: impByPos.get(pos) ?? 0,
+      clk7: clkByPos.get(pos) ?? 0
+    }));
+    return {
+      platforms: Number(platCount?.n ?? 0),
+      users: Number(userCount?.n ?? 0),
+      visits7d: Number(visitCount?.n ?? 0),
+      zones
+    };
+  }),
+  /** 招商页：广告合作申请 */
+  submitAdInquiry: publicQuery.input(
+    external_exports.object({
+      name: external_exports.string().min(1).max(120),
+      contact: external_exports.string().min(3).max(200),
+      positions: external_exports.array(external_exports.enum(["home", "list", "top", "bottom", "left", "right", "popup"])).min(1).max(7),
+      message: external_exports.string().max(1e3).optional()
+    })
+  ).mutation(async ({ input }) => {
+    await getDb().insert(adInquiries).values({
+      name: input.name,
+      contact: input.contact,
+      positions: input.positions,
+      message: input.message ?? ""
+    });
+    return { success: true };
+  }),
   zoneAds: publicQuery.input(external_exports.object({ position: external_exports.enum(["top", "bottom", "left", "right", "popup"]) })).query(async ({ input }) => {
     const db = getDb();
     const rows = await db.select({ campaign: adCampaigns, platform: platforms }).from(adCampaigns).innerJoin(platforms, eq(adCampaigns.platformId, platforms.id)).where(
@@ -51671,6 +51734,14 @@ var adminRouter = createRouter({
   }),
   deleteCampaign: adminQuery.input(external_exports.object({ id: external_exports.number() })).mutation(async ({ input }) => {
     await getDb().delete(adCampaigns).where(eq(adCampaigns.id, input.id));
+    return { success: true };
+  }),
+  /** 广告合作申请列表 */
+  listAdInquiries: adminQuery.query(async () => {
+    return getDb().select().from(adInquiries).orderBy(desc(adInquiries.createdAt)).limit(200);
+  }),
+  setAdInquiryStatus: adminQuery.input(external_exports.object({ id: external_exports.number(), status: external_exports.enum(["pending", "contacted", "deal", "closed"]) })).mutation(async ({ input }) => {
+    await getDb().update(adInquiries).set({ status: input.status }).where(eq(adInquiries.id, input.id));
     return { success: true };
   }),
   // ---------- 用户管理 ----------

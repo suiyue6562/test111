@@ -347,5 +347,18 @@ export const adCampaigns = mysqlTable(
 
 export type AdCampaign = typeof adCampaigns.$inferSelect;
 
+// ---------- 广告合作申请 ----------
+export const adInquiries = mysqlTable("ad_inquiries", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(), // 站点/品牌名
+  contact: varchar("contact", { length: 200 }).notNull(), // 联系方式
+  positions: json("positions").$type<string[]>().notNull(), // 意向位置
+  message: text("message"),
+  status: mysqlEnum("status", ["pending", "contacted", "deal", "closed"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AdInquiry = typeof adInquiries.$inferSelect;
+
 export type InsertPlatformPrice = typeof platformPrices.$inferInsert;
 export type InsertSkrCode = typeof skrCodes.$inferInsert;

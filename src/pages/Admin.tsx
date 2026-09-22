@@ -186,6 +186,10 @@ export default function Admin() {
     enabled: user?.role === "admin",
     refetchInterval: 60_000,
   });
+  const { data: adInqs } = trpc.admin.listAdInquiries.useQuery(undefined, {
+    enabled: user?.role === "admin",
+    refetchInterval: 60_000,
+  });
 
   const [editOpen, setEditOpen] = useState(false);
   const [editPlat, setEditPlat] = useState<(typeof plats extends (infer T)[] | undefined ? T : never) | null>(null);
@@ -239,6 +243,10 @@ export default function Admin() {
   });
   const delCamp = trpc.admin.deleteCampaign.useMutation({
     onSuccess: () => { toast.success("已移除"); utils.admin.listCampaigns.invalidate(); },
+    onError: (e) => toast.error(e.message),
+  });
+  const setInq = trpc.admin.setAdInquiryStatus.useMutation({
+    onSuccess: () => { utils.admin.listAdInquiries.invalidate(); toast.success("已更新"); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -784,6 +792,60 @@ export default function Admin() {
                     <TableCell colSpan={11} className="text-center text-muted-foreground py-6">
                       暂无区域广告投放。上方选择站点和位置即可投放。
                     </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* 招商页申请 */}
+          <div className="rounded-xl border bg-card p-4 overflow-x-auto">
+            <div className="text-sm font-medium mb-3">
+              投放申请（来自招商页）{adInqs ? `（待处理 ${adInqs.filter((i) => i.status === "pending").length}）` : ""}
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>站点/品牌</TableHead><TableHead>联系方式</TableHead><TableHead>意向位置</TableHead>
+                  <TableHead>留言</TableHead><TableHead>时间</TableHead><TableHead>状态</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {adInqs?.map((q) => (
+                  <TableRow key={q.id}>
+                    <TableCell className="font-medium">{q.name}</TableCell>
+                    <TableCell className="text-xs">{q.contact}</TableCell>
+                    <TableCell className="text-xs">
+                      {(q.positions as string[]).map((p) => (
+                        <Badge key={p} variant="outline" className="mr-1">
+                          {{ home: "首页", list: "筛选页", top: "顶部", bottom: "底部", left: "左侧", right: "右侧", popup: "弹窗" }[p] ?? p}
+                        </Badge>
+                      ))}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground max-w-48 truncate">{q.message || "—"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{fmtDateTime(q.createdAt)}</TableCell>
+                    <TableCell>
+                      <Badge variant={q.status === "pending" ? "default" : q.status === "deal" ? "default" : "secondary"}>
+                        {{ pending: "待处理", contacted: "已联系", deal: "已成交", closed: "已关闭" }[q.status]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right space-x-1">
+                      {q.status === "pending" && (
+                        <Button size="sm" variant="outline" onClick={() => setInq.mutate({ id: q.id, status: "contacted" })}>标记联系</Button>
+                      )}
+                      {q.status === "contacted" && (
+                        <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => setInq.mutate({ id: q.id, status: "deal" })}>成交</Button>
+                      )}
+                      {q.status !== "closed" && q.status !== "deal" && (
+                        <Button size="sm" variant="ghost" onClick={() => setInq.mutate({ id: q.id, status: "closed" })}>关闭</Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {(!adInqs || adInqs.length === 0) && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-6">暂无申请</TableCell>
                   </TableRow>
                 )}
               </TableBody>
