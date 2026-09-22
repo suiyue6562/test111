@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/providers/trpc";
-import { fmtLatency, vendorColor, timeAgo } from "@/lib/format";
+import { fmtLatency, vendorColor, timeAgo, fmtRatio } from "@/lib/format";
 import { toast } from "sonner";
 
 type SortKey = "ratioAsc" | "ratioDesc" | "latencyAsc" | "uptimeDesc";
@@ -24,10 +24,11 @@ export default function Pricing() {
   });
 
   const vendors = useMemo(() => catalog?.map((c) => c.vendor) ?? [], [catalog]);
-  const models = useMemo(
+  const modelEntries = useMemo(
     () => catalog?.find((c) => c.vendor === vendor)?.models ?? [],
     [catalog, vendor],
   );
+  const models = useMemo(() => modelEntries.map((m) => m.label), [modelEntries]);
   const filteredModels = useMemo(() => {
     const q = modelQuery.trim().toLowerCase();
     if (!q) return models;
@@ -36,8 +37,8 @@ export default function Pricing() {
   // 当前模型的真实可用价格组（来自官网采集的目录）
   const modelGroups = useMemo(() => {
     if (!model) return [] as string[];
-    return catalog?.find((c) => c.vendor === vendor)?.groups?.[model] ?? [];
-  }, [catalog, vendor, model]);
+    return modelEntries.find((m) => m.label === model)?.groups ?? [];
+  }, [modelEntries, model]);
 
   useEffect(() => {
     if (!vendor && vendors.length > 0) setVendor(vendors[0]);
@@ -120,7 +121,7 @@ export default function Pricing() {
                   </div>
                   <div className="text-right">
                     <div className="text-base font-bold text-indigo-600 dark:text-indigo-400">
-                      {b.isRatio ? `${b.minEff.toFixed(2)}x` : `￥${b.minEff.toFixed(3)}/次`}
+                      {b.isRatio ? `${fmtRatio(b.minEff)}x` : `￥${b.minEff.toFixed(3)}/次`}
                     </div>
                     {b.cheaperThanSecond != null && b.cheaperThanSecond > 0 && (
                       <Badge variant="secondary" className="text-[10px] text-emerald-600 dark:text-emerald-400">
@@ -255,7 +256,8 @@ export default function Pricing() {
                     <div className="text-xs text-muted-foreground">{fmtLatency(it.avgLatency)}</div>
                   </td>
                   <td className="p-3 font-semibold text-indigo-600 dark:text-indigo-400">
-                    {Number(it.ratio).toFixed(4)}x
+                    {it.isRatio ? `${fmtRatio(it.ratio)}x` : `￥${Number(it.shortCost).toFixed(3)}/次`}
+                    <div className="text-[10px] font-normal text-muted-foreground font-mono">{it.variant}</div>
                   </td>
                   <td className="p-3">￥{Number(it.shortCost).toFixed(3)} / 次</td>
                   <td className="p-3">￥{Number(it.longCost).toFixed(3)} / 次</td>

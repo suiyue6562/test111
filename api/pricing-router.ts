@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { platforms, platformPrices, platformDailyStatus } from "@db/schema";
 import { getDb } from "./queries/connection";
 import { createRouter, publicQuery } from "./middleware";
@@ -8,70 +8,128 @@ function pad(n: number) {
   return String(n).padStart(2, "0");
 }
 
+/**
+ * 模型名归一化：去掉供应商前缀(openai/)、日期后缀(-20250929)、:batch 等变体标记，
+ * 再按白名单识别为规范名（如 GPT-5、Claude Sonnet 4.5）。
+ * 返回 null 表示非主流通用模型（站点自造名/图像音频等），不进价格页目录与榜单。
+ */
+function canonicalModel(raw: string): { label: string; family: string } | null {
+  let s = raw.toLowerCase().trim();
+  s = s.replace(/^[a-z0-9_.-]+\//, ""); // 供应商前缀
+  s = s.replace(/:.*$/, ""); // :batch / :free
+  s = s.replace(/-20\d{2}-?\d{2}-?\d{2}$/, ""); // 日期后缀
+  s = s.replace(/-(latest|preview|beta|exp|stable)$/, "");
+  let m: RegExpMatchArray | null;
+
+  if ((m = s.match(/^gpt-(5(?:\.\d+)?|4o|4\.1)(-mini|-nano|-pro)?$/))) {
+    return { label: `GPT-${m[1]}${m[2] ? m[2].replace("-", " ") : ""}`, family: "OpenAI" };
+  }
+  if ((m = s.match(/^o[34](-mini|-pro)?$/))) {
+    return { label: m[0].replace("-mini", " mini").replace("-pro", " pro"), family: "OpenAI" };
+  }
+  if ((m = s.match(/^claude-(opus|sonnet|haiku)-(\d+)(?:[.-](\d+))?$/))) {
+    const kind = m[1][0].toUpperCase() + m[1].slice(1);
+    const ver = m[3] ? `${m[2]}.${m[3]}` : m[2];
+    return { label: `Claude ${kind} ${ver}`, family: "Claude" };
+  }
+  if ((m = s.match(/^claude-3[.-]([57])-(opus|sonnet|haiku)$/))) {
+    const kind = m[2][0].toUpperCase() + m[2].slice(1);
+    return { label: `Claude 3.${m[1]} ${kind}`, family: "Claude" };
+  }
+  if ((m = s.match(/^gemini-(\d+(?:\.\d+)?)-(pro|flash)(-lite)?$/))) {
+    return { label: `Gemini ${m[1]} ${m[2][0].toUpperCase() + m[2].slice(1)}${m[3] ? " Lite" : ""}`, family: "Gemini" };
+  }
+  if ((m = s.match(/^deepseek-(chat|reasoner)$/))) {
+    return { label: m[1] === "chat" ? "DeepSeek V3" : "DeepSeek R1", family: "DeepSeek" };
+  }
+  if ((m = s.match(/^deepseek-(v3|r1)(\.\d+)?$/))) {
+    return { label: `DeepSeek ${m[1].toUpperCase()}`, family: "DeepSeek" };
+  }
+  if ((m = s.match(/^qwen3?-(max|plus|turbo|flash)$/)) || (m = s.match(/^qwen-(max|plus|turbo)$/))) {
+    const v = s.startsWith("qwen3") ? "Qwen3" : "Qwen";
+    const tier = m[1][0].toUpperCase() + m[1].slice(1);
+    return { label: `${v} ${tier}`, family: "Qwen" };
+  }
+  if (/^kimi-k2/.test(s)) return { label: "Kimi K2", family: "Kimi" };
+  if ((m = s.match(/^glm-(\d+(?:\.\d+)?)(-air|-flash|-plus)?$/))) {
+    return { label: `GLM-${m[1]}${m[2] ? m[2].replace("-", " ") : ""}`, family: "GLM" };
+  }
+  if ((m = s.match(/^grok-(\d+(?:\.\d+)?)(-mini|-fast|-heavy)?$/))) {
+    return { label: `Grok ${m[1]}${m[2] ? m[2].replace("-", " ") : ""}`, family: "xAI" };
+  }
+  return null;
+}
+
 export const pricingRouter = createRouter({
-  /** 可选模型目录（含每个模型的真实可用价格组，来自官网采集） */
+  /** 规范模型目录：canonical 白名单模型，含原始型号变体与真实可用价格组 */
   catalog: publicQuery.query(async () => {
     const db = getDb();
     const rows = await db
-      .selectDistinct({
-        vendor: platformPrices.vendor,
-        model: platformPrices.model,
-        groupName: platformPrices.groupName,
-      })
+      .selectDistinct({ model: platformPrices.model, groupName: platformPrices.groupName })
       .from(platformPrices);
-    const map = new Map<string, string[]>();
-    const groupMap = new Map<string, string[]>();
+    const byLabel = new Map<string, { label: string; family: string; variants: Set<string>; groups: Set<string> }>();
     for (const r of rows) {
-      const arr = map.get(r.vendor) ?? [];
-      if (!arr.includes(r.model)) arr.push(r.model);
-      map.set(r.vendor, arr);
-      const gk = `${r.vendor}|${r.model}`;
-      const garr = groupMap.get(gk) ?? [];
-      garr.push(r.groupName);
-      groupMap.set(gk, garr);
+      const c = canonicalModel(r.model);
+      if (!c) continue;
+      const e = byLabel.get(c.label) ?? { label: c.label, family: c.family, variants: new Set(), groups: new Set() };
+      e.variants.add(r.model);
+      e.groups.add(r.groupName);
+      byLabel.set(c.label, e);
     }
-    return Array.from(map.entries()).map(([vendor, models]) => ({
-      vendor,
-      models: models.sort(),
-      // 每个模型的可用组（default 优先），前端价格组筛选用
-      groups: Object.fromEntries(
-        models.map((m) => {
-          const gs = (groupMap.get(`${vendor}|${m}`) ?? []).sort((a, b) =>
-            a === "default" ? -1 : b === "default" ? 1 : a.localeCompare(b),
-          );
-          return [m, gs];
-        }),
-      ),
-    }));
+    const families = new Map<string, { label: string; variants: string[]; groups: string[] }[]>();
+    for (const e of byLabel.values()) {
+      const arr = families.get(e.family) ?? [];
+      arr.push({
+        label: e.label,
+        variants: [...e.variants],
+        groups: [...e.groups].sort((a, b) => (a === "default" ? -1 : b === "default" ? 1 : a.localeCompare(b))),
+      });
+      families.set(e.family, arr);
+    }
+    const FAMILY_ORDER = ["OpenAI", "Claude", "Gemini", "DeepSeek", "Qwen", "Kimi", "GLM", "xAI"];
+    return [...families.entries()]
+      .sort((a, b) => (FAMILY_ORDER.indexOf(a[0]) + 99) - (FAMILY_ORDER.indexOf(b[0]) + 99))
+      .map(([vendor, models]) => ({ vendor, models: models.sort((a, b) => a.label.localeCompare(b.label)) }));
   }),
 
-  /** 价格表：按模型聚合各站点价格 */
+  /** 价格表：canonical 模型（label）→ 全部原始型号变体，按模型聚合各站点价格 */
   table: publicQuery
     .input(
       z.object({
         vendor: z.string(),
-        model: z.string(),
+        model: z.string(), // canonical label
         groupName: z.string().default("default"),
         sort: z.enum(["ratioAsc", "ratioDesc", "latencyAsc", "uptimeDesc"]).default("ratioAsc"),
       }),
     )
     .query(async ({ input }) => {
       const db = getDb();
+      const distinct = await db.selectDistinct({ model: platformPrices.model }).from(platformPrices);
+      const variants = distinct.map((d) => d.model).filter((m) => canonicalModel(m)?.label === input.model);
+      if (variants.length === 0) return { total: 0, items: [] };
       const prices = await db
         .select()
         .from(platformPrices)
-        .where(
-          and(
-            eq(platformPrices.vendor, input.vendor),
-            eq(platformPrices.model, input.model),
-            eq(platformPrices.groupName, input.groupName),
-          ),
-        );
+        .where(and(inArray(platformPrices.model, variants), eq(platformPrices.groupName, input.groupName)));
       if (prices.length === 0) return { total: 0, items: [] };
+      // 有效价：倍率>0 用倍率；按次计费（倍率=0）用短文花费；每平台取最低
+      const effOf = (r: { ratio: string; shortCost: string }) => {
+        const ratio = Number(r.ratio);
+        if (ratio > 0) return { e: ratio, isRatio: true };
+        const c = Number(r.shortCost);
+        return c > 0 ? { e: c, isRatio: false } : null;
+      };
+      const bestByPlat = new Map<number, { row: (typeof prices)[number]; e: number; isRatio: boolean }>();
+      for (const r of prices) {
+        const v = effOf(r);
+        if (!v) continue;
+        const cur = bestByPlat.get(r.platformId);
+        if (!cur || v.e < cur.e) bestByPlat.set(r.platformId, { row: r, ...v });
+      }
       const plats = await db
         .select()
         .from(platforms)
-        .where(inArray(platforms.id, prices.map((p) => p.platformId)));
+        .where(inArray(platforms.id, [...bestByPlat.keys()]));
       const since = new Date();
       since.setDate(since.getDate() - 29);
       const sinceStr = `${since.getFullYear()}-${pad(since.getMonth() + 1)}-${pad(since.getDate())}`;
@@ -79,7 +137,7 @@ export const pricingRouter = createRouter({
         .select()
         .from(platformDailyStatus)
         .where(inArray(platformDailyStatus.platformId, plats.map((p) => p.id)));
-      const items = prices.map((pr) => {
+      const items = [...bestByPlat.values()].map(({ row: pr, e, isRatio }) => {
         const plat = plats.find((p) => p.id === pr.platformId);
         const days = stats.filter(
           (s) => s.platformId === pr.platformId && s.date >= sinceStr && s.status !== "nodata",
@@ -97,6 +155,9 @@ export const pricingRouter = createRouter({
           name: plat?.name ?? "未知",
           domain: plat?.domain ?? "",
           url: plat?.url ?? "",
+          variant: pr.model,
+          eff: e,
+          isRatio,
           ratio: pr.ratio,
           shortCost: pr.shortCost,
           longCost: pr.longCost,
@@ -107,7 +168,7 @@ export const pricingRouter = createRouter({
       });
       switch (input.sort) {
         case "ratioDesc":
-          items.sort((a, b) => Number(b.ratio) - Number(a.ratio));
+          items.sort((a, b) => b.eff - a.eff);
           break;
         case "latencyAsc":
           items.sort((a, b) => (a.avgLatency ?? Infinity) - (b.avgLatency ?? Infinity));
@@ -116,7 +177,7 @@ export const pricingRouter = createRouter({
           items.sort((a, b) => (b.uptime ?? -1) - (a.uptime ?? -1));
           break;
         default:
-          items.sort((a, b) => Number(a.ratio) - Number(b.ratio));
+          items.sort((a, b) => a.eff - b.eff);
       }
       return { total: items.length, items };
     }),
@@ -134,71 +195,67 @@ export const pricingRouter = createRouter({
     }),
 
   /**
-   * 热门模型全网最低价榜单：按在售站数取热门模型，找出每个模型的最低价站点
+   * 热门模型全网最低价榜单：canonical 白名单模型，按在售站数排序，找每模型最低价站点
+   * 倍率与按次花费不混排：只有同一单位才计算「比次低便宜」
    */
   lowestBoard: publicQuery.query(async () => {
     const db = getDb();
-    // 热门模型：在售站点最多的前 30 个
-    const hot = await db
-      .select({
-        model: platformPrices.model,
-        vendor: platformPrices.vendor,
-        sellers: sql<number>`count(distinct ${platformPrices.platformId})`,
-      })
-      .from(platformPrices)
-      .groupBy(platformPrices.model, platformPrices.vendor)
-      .orderBy(desc(sql`count(distinct ${platformPrices.platformId})`))
-      .limit(30);
-    if (hot.length === 0) return [];
-    const rows = await db
+    const all = await db
       .select({
         platformId: platformPrices.platformId,
         model: platformPrices.model,
         ratio: platformPrices.ratio,
         shortCost: platformPrices.shortCost,
       })
-      .from(platformPrices)
-      .where(inArray(platformPrices.model, hot.map((h) => h.model)));
+      .from(platformPrices);
     const plats = await db
       .select({ id: platforms.id, name: platforms.name, domain: platforms.domain, status: platforms.status })
       .from(platforms)
-      .where(inArray(platforms.id, [...new Set(rows.map((r) => r.platformId))]));
+      .where(inArray(platforms.id, [...new Set(all.map((r) => r.platformId))]));
     const platOf = new Map(plats.map((p) => [p.id, p]));
-    const eff = (r: { ratio: string; shortCost: string }) => {
+    // canonical 聚合：label → { family, platformId → 最低有效价 }
+    const byLabel = new Map<string, { family: string; pm: Map<number, { e: number; isRatio: boolean }> }>();
+    for (const r of all) {
+      const c = canonicalModel(r.model);
+      if (!c) continue;
+      const plat = platOf.get(r.platformId);
+      if (!plat || plat.status === "down" || plat.stage === "closed") continue;
       const ratio = Number(r.ratio);
-      return ratio > 0 ? ratio : Number(r.shortCost) || Infinity;
-    };
+      const cost = Number(r.shortCost);
+      const v = ratio > 0 ? { e: ratio, isRatio: true } : cost > 0 ? { e: cost, isRatio: false } : null;
+      if (!v) continue;
+      const e0 = byLabel.get(c.label) ?? { family: c.family, pm: new Map() };
+      const cur = e0.pm.get(r.platformId);
+      if (!cur || v.e < cur.e) e0.pm.set(r.platformId, v);
+      byLabel.set(c.label, e0);
+    }
+    // 热门度 = 在售站数，取前 30
+    const hot = [...byLabel.entries()]
+      .map(([label, e0]) => ({ label, family: e0.family, pm: e0.pm, sellers: e0.pm.size }))
+      .sort((a, b) => b.sellers - a.sellers)
+      .slice(0, 30);
     return hot
-      .map((h) => {
-        // 按平台去重取最低，剔除故障站和完全无有效价格的记录（倍率=0 且无花费数据）
-        const byPlat = new Map<number, number>();
-        for (const r of rows) {
-          if (r.model !== h.model) continue;
-          const plat = platOf.get(r.platformId);
-          if (!plat || plat.status === "down") continue;
-          const e = eff(r);
-          if (e === Infinity) continue;
-          byPlat.set(r.platformId, Math.min(byPlat.get(r.platformId) ?? Infinity, e));
-        }
-        const sorted = [...byPlat.entries()].sort((a, b) => a[1] - b[1]);
-        if (sorted.length === 0) return null;
-        const [minPid, minEff] = sorted[0];
-        const minPlat = platOf.get(minPid)!;
-        const secondEff = sorted[1]?.[1] ?? null;
+      .map(({ label, family, pm, sellers }) => {
+        // 同单位比较：倍率与按次分开取最低价，优先展示倍率
+        const ratios = [...pm.entries()].filter(([, v]) => v.isRatio).sort((a, b) => a[1].e - b[1].e);
+        const costs = [...pm.entries()].filter(([, v]) => !v.isRatio).sort((a, b) => a[1].e - b[1].e);
+        const pick = ratios.length > 0 ? ratios : costs;
+        if (pick.length === 0) return null;
+        const [minPid, minV] = pick[0];
+        const minPlat = platOf.get(minPid);
+        if (!minPlat) return null;
+        const second = pick[1]?.[1];
         return {
-          vendor: h.vendor,
-          model: h.model,
-          sellers: sorted.length,
-          minEff,
-          isRatio: minEff !== Infinity,
+          vendor: family,
+          model: label,
+          sellers,
+          minEff: minV.e,
+          isRatio: minV.isRatio,
           minPlatformId: minPlat.id,
           minPlatformName: minPlat.name,
           minDomain: minPlat.domain,
-          // 比次低便宜的百分比（无次低则 null）
           cheaperThanSecond:
-            secondEff != null && secondEff > 0 && minEff !== Infinity
-              ? Math.round(((secondEff - minEff) / secondEff) * 100)
-              : null,
+            second && second.e > 0 ? Math.round(((second.e - minV.e) / second.e) * 100) : null,
         };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
