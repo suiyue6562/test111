@@ -113,4 +113,76 @@ export const pricingRouter = createRouter({
         .where(eq(platformPrices.platformId, input.platformId))
         .orderBy(asc(platformPrices.vendor), asc(platformPrices.model));
     }),
+
+  /**
+   * 同站比价：该站每个模型在全网的价格排名
+   * 返回 { [model]: { rank, total, minPlatformName, minDomain, minEff, myEff, isRatio } }
+   * eff：有效价格，倍率>0 用倍率，按次计费（倍率=0）用短文花费
+   */
+  modelCompare: publicQuery
+    .input(z.object({ platformId: z.number() }))
+    .query(async ({ input }) => {
+      const db = getDb();
+      const mine = await db
+        .select()
+        .from(platformPrices)
+        .where(eq(platformPrices.platformId, input.platformId));
+      if (mine.length === 0) return {};
+      const models = [...new Set(mine.map((m) => m.model))];
+      const all = await db
+        .select({
+          platformId: platformPrices.platformId,
+          model: platformPrices.model,
+          ratio: platformPrices.ratio,
+          shortCost: platformPrices.shortCost,
+        })
+        .from(platformPrices)
+        .where(inArray(platformPrices.model, models));
+      const sellerIds = [...new Set(all.map((a) => a.platformId))];
+      const plats = await db
+        .select({ id: platforms.id, name: platforms.name, domain: platforms.domain, status: platforms.status })
+        .from(platforms)
+        .where(inArray(platforms.id, sellerIds));
+      const platOf = new Map(plats.map((p) => [p.id, p]));
+
+      const eff = (r: { ratio: string; shortCost: string }) => {
+        const ratio = Number(r.ratio);
+        return ratio > 0 ? ratio : Number(r.shortCost) || Infinity;
+      };
+      // 每个模型：按平台去重（取该平台最低有效价），过滤已关闭站
+      const byModel = new Map<string, { platformId: number; eff: number }[]>();
+      for (const r of all) {
+        const plat = platOf.get(r.platformId);
+        if (!plat || plat.status === "down") continue;
+        const arr = byModel.get(r.model) ?? [];
+        const existing = arr.find((x) => x.platformId === r.platformId);
+        const e = eff(r);
+        if (existing) existing.eff = Math.min(existing.eff, e);
+        else arr.push({ platformId: r.platformId, eff: e });
+        byModel.set(r.model, arr);
+      }
+
+      const result: Record<
+        string,
+        { rank: number; total: number; minPlatformName: string; minDomain: string; minEff: number; myEff: number; isRatio: boolean }
+      > = {};
+      for (const m of mine) {
+        const sellers = byModel.get(m.model) ?? [];
+        if (sellers.length < 2) continue; // 全网只有一家卖，无比价意义
+        const myEff = eff(m);
+        const cheaper = sellers.filter((s) => s.platformId !== input.platformId && s.eff < myEff - 1e-9).length;
+        const minSeller = sellers.reduce((a, b) => (b.eff < a.eff ? b : a));
+        const minPlat = platOf.get(minSeller.platformId);
+        result[m.model] = {
+          rank: cheaper + 1,
+          total: sellers.length,
+          minPlatformName: minPlat?.name ?? "",
+          minDomain: minPlat?.domain ?? "",
+          minEff: minSeller.eff,
+          myEff,
+          isRatio: Number(m.ratio) > 0,
+        };
+      }
+      return result;
+    }),
 });

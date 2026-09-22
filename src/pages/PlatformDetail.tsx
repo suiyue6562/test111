@@ -40,6 +40,10 @@ export default function PlatformDetail() {
     { platformId: data?.platform.id ?? 0 },
     { enabled: !!data },
   );
+  const { data: compare } = trpc.pricing.modelCompare.useQuery(
+    { platformId: data?.platform.id ?? 0 },
+    { enabled: !!data },
+  );
   const { data: skrActs } = trpc.skr.list.useQuery();
   const [rating, setRating] = useState(5);
   const [content, setContent] = useState("");
@@ -263,6 +267,7 @@ export default function PlatformDetail() {
                           <th className="px-3 py-1.5 font-medium">倍率</th>
                           <th className="px-3 py-1.5 font-medium">短文花费</th>
                           <th className="px-3 py-1.5 font-medium">长文花费</th>
+                          <th className="px-3 py-1.5 font-medium">全网对比</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -275,6 +280,31 @@ export default function PlatformDetail() {
                             </td>
                             <td className="px-3 py-2">￥{Number(pr.shortCost).toFixed(3)}</td>
                             <td className="px-3 py-2">￥{Number(pr.longCost).toFixed(3)}</td>
+                            <td className="px-3 py-2 text-xs">
+                              {(() => {
+                                const cmp = compare?.[pr.model];
+                                if (!cmp) return <span className="text-muted-foreground/60">独家</span>;
+                                if (cmp.rank === 1)
+                                  return (
+                                    <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-[10px]">
+                                      全网最低 · {cmp.total} 站在售
+                                    </Badge>
+                                  );
+                                const pct =
+                                  cmp.minEff > 0 && cmp.minEff !== Infinity
+                                    ? Math.round(((cmp.myEff - cmp.minEff) / cmp.minEff) * 100)
+                                    : null;
+                                return (
+                                  <span
+                                    className={pct != null && pct > 50 ? "text-rose-500" : "text-muted-foreground"}
+                                    title={`全网最低：${cmp.minPlatformName}（${cmp.minDomain}）`}
+                                  >
+                                    第 {cmp.rank} 低 / {cmp.total} 站
+                                    {pct != null && pct > 0 && ` · 高 ${pct}%`}
+                                  </span>
+                                );
+                              })()}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
