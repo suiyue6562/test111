@@ -50493,6 +50493,7 @@ var platformRouter = createRouter({
     const adRows = await db.select().from(platforms).where(
       and(
         eq(platforms.isAd, true),
+        sql`${platforms.status} != 'down'`,
         or(sql`${platforms.adExpireAt} IS NULL`, sql`${platforms.adExpireAt} > NOW()`)
       )
     ).orderBy(desc(platforms.adWeight), desc(platforms.score)).limit(6);
@@ -50503,15 +50504,27 @@ var platformRouter = createRouter({
     const hotIds = await db.select({ platformId: visitLogs.platformId, c: sql`count(*)` }).from(visitLogs).where(sql`${visitLogs.createdAt} >= ${since7}`).groupBy(visitLogs.platformId).orderBy(desc(sql`count(*)`)).limit(12);
     let hotRows = [];
     if (hotIds.length > 0) {
-      const rows = await db.select().from(platforms).where(inArray(platforms.id, hotIds.map((h) => h.platformId)));
+      const rows = await db.select().from(platforms).where(
+        and(
+          inArray(platforms.id, hotIds.map((h) => h.platformId)),
+          sql`${platforms.status} != 'down'`,
+          sql`${platforms.stage} != 'closed'`
+        )
+      );
       const order2 = new Map(hotIds.map((h, i) => [h.platformId, i]));
       hotRows = rows.sort((a, b) => (order2.get(a.id) ?? 99) - (order2.get(b.id) ?? 99));
     } else {
-      hotRows = await db.select().from(platforms).where(sql`${platforms.stage} != 'closed'`).orderBy(desc(platforms.visitCount)).limit(12);
+      hotRows = await db.select().from(platforms).where(sql`${platforms.stage} != 'closed' AND ${platforms.status} != 'down'`).orderBy(desc(platforms.visitCount)).limit(12);
     }
     const hot = take(hotRows, 6);
     const since30 = new Date(Date.now() - 30 * 864e5);
-    const newRows = await db.select().from(platforms).where(and(sql`${platforms.createdAt} >= ${since30}`, sql`${platforms.stage} != 'closed'`)).orderBy(desc(platforms.createdAt)).limit(12);
+    const newRows = await db.select().from(platforms).where(
+      and(
+        sql`${platforms.createdAt} >= ${since30}`,
+        sql`${platforms.stage} != 'closed'`,
+        sql`${platforms.status} != 'down'`
+      )
+    ).orderBy(desc(platforms.createdAt)).limit(12);
     const newSites = take(newRows, 6);
     return {
       ads: await withStats(db, ads),
@@ -50604,12 +50617,11 @@ var platformRouter = createRouter({
       default: {
         const ads = result.filter((r) => r.adActive).sort((a, b) => b.adWeight - a.adWeight || Number(b.score) - Number(a.score)).slice(0, AD_PIN_LIMIT);
         const adIds = new Set(ads.map((a) => a.id));
-        const rest = result.filter((r) => !adIds.has(r.id)).sort((a, b) => {
-          const sa = Number(a.score) + (ageDays(a) <= NEW_SITE_DAYS ? NEW_SITE_BOOST : 0);
-          const sb = Number(b.score) + (ageDays(b) <= NEW_SITE_DAYS ? NEW_SITE_BOOST : 0);
-          return sb - sa || b.visitCount - a.visitCount;
-        });
-        result = [...ads, ...rest];
+        const adjScore = (r) => Number(r.score) + (ageDays(r) <= NEW_SITE_DAYS ? NEW_SITE_BOOST : 0);
+        const rest = result.filter((r) => !adIds.has(r.id));
+        const alive = rest.filter((r) => r.status !== "down").sort((a, b) => adjScore(b) - adjScore(a) || b.visitCount - a.visitCount);
+        const down = rest.filter((r) => r.status === "down").sort((a, b) => adjScore(b) - adjScore(a));
+        result = [...ads, ...alive, ...down];
       }
     }
     const total = result.length;
