@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { platforms, platformPrices, platformDailyStatus } from "@db/schema";
 import { getDb } from "./queries/connection";
 import { createRouter, publicQuery } from "./middleware";
@@ -23,6 +23,11 @@ function canonicalModel(raw: string): { label: string; family: string } | null {
 
   if ((m = s.match(/^gpt-(5(?:\.\d+)?|4o|4\.1)(-mini|-nano|-pro)?$/))) {
     return { label: `GPT-${m[1]}${m[2] ? m[2].replace("-", " ") : ""}`, family: "OpenAI" };
+  }
+  if ((m = s.match(/^gpt-(5(?:\.\d+)?)-codex(-mini|-max)?$/)) || (m = s.match(/^codex(-mini)?$/))) {
+    const base = s.startsWith("codex") ? "Codex" : `GPT-${m[1]} Codex`;
+    const suffix = m[2] ? m[2].replace("-", " ") : "";
+    return { label: `${base}${suffix ? ` ${suffix}` : ""}`, family: "OpenAI" };
   }
   if ((m = s.match(/^o[34](-mini|-pro)?$/))) {
     return { label: m[0].replace("-mini", " mini").replace("-pro", " pro"), family: "OpenAI" };
@@ -56,6 +61,17 @@ function canonicalModel(raw: string): { label: string; family: string } | null {
   }
   if ((m = s.match(/^grok-(\d+(?:\.\d+)?)(-mini|-fast|-heavy)?$/))) {
     return { label: `Grok ${m[1]}${m[2] ? m[2].replace("-", " ") : ""}`, family: "xAI" };
+  }
+  if ((m = s.match(/^doubao-(pro|lite|seed)[-]?(\d+(?:\.\d+)?k?)?$/))) {
+    const tier = m[1][0].toUpperCase() + m[1].slice(1);
+    return { label: `豆包 ${tier}${m[2] ? ` ${m[2]}` : ""}`, family: "豆包" };
+  }
+  if (/^minimax-(m[23]|abab)/.test(s) || /^MiniMax-M/i.test(raw)) {
+    const mm = s.match(/m[23](?:\.\d+)?/);
+    return { label: `MiniMax ${mm ? mm[0].toUpperCase() : "M"}`, family: "MiniMax" };
+  }
+  if (/^hunyuan-(large|pro|standard|turbo)/.test(s)) {
+    return { label: "混元 " + s.replace(/^hunyuan-/, "").replace(/^\w/, (c) => c.toUpperCase()), family: "混元" };
   }
   return null;
 }
@@ -92,13 +108,16 @@ export const pricingRouter = createRouter({
       .map(([vendor, models]) => ({ vendor, models: models.sort((a, b) => a.label.localeCompare(b.label)) }));
   }),
 
-  /** 价格表：canonical 模型（label）→ 全部原始型号变体，按模型聚合各站点价格 */
+  /**
+   * 价格表：canonical 模型（label）→ 全部原始型号变体，按站点聚合。
+   * 价格组不再全局混选（各站组名是私有概念，混选无意义）：
+   * 每站优先取「缺省用户组 default」价格（普通用户实际支付价），没有 default 组则取该站最低价组并标注组名。
+   */
   table: publicQuery
     .input(
       z.object({
         vendor: z.string(),
         model: z.string(), // canonical label
-        groupName: z.string().default("default"),
         sort: z.enum(["ratioAsc", "ratioDesc", "latencyAsc", "uptimeDesc"]).default("ratioAsc"),
       }),
     )
@@ -110,21 +129,33 @@ export const pricingRouter = createRouter({
       const prices = await db
         .select()
         .from(platformPrices)
-        .where(and(inArray(platformPrices.model, variants), eq(platformPrices.groupName, input.groupName)));
+        .where(inArray(platformPrices.model, variants));
       if (prices.length === 0) return { total: 0, items: [] };
-      // 有效价：倍率>0 用倍率；按次计费（倍率=0）用短文花费；每平台取最低
+      // 有效价：倍率>0 用倍率；按次计费（倍率=0）用短文花费
       const effOf = (r: { ratio: string; shortCost: string }) => {
         const ratio = Number(r.ratio);
         if (ratio > 0) return { e: ratio, isRatio: true };
         const c = Number(r.shortCost);
         return c > 0 ? { e: c, isRatio: false } : null;
       };
-      const bestByPlat = new Map<number, { row: (typeof prices)[number]; e: number; isRatio: boolean }>();
+      // 每平台：优先 default 组，否则最低价组
+      const rowsByPlat = new Map<number, typeof prices>();
       for (const r of prices) {
-        const v = effOf(r);
-        if (!v) continue;
-        const cur = bestByPlat.get(r.platformId);
-        if (!cur || v.e < cur.e) bestByPlat.set(r.platformId, { row: r, ...v });
+        const arr = rowsByPlat.get(r.platformId) ?? [];
+        arr.push(r);
+        rowsByPlat.set(r.platformId, arr);
+      }
+      const bestByPlat = new Map<number, { row: (typeof prices)[number]; e: number; isRatio: boolean }>();
+      for (const [pid, rows] of rowsByPlat) {
+        const defaults = rows.filter((r) => r.groupName === "default");
+        const pool2 = defaults.length > 0 ? defaults : rows;
+        let best: { row: (typeof prices)[number]; e: number; isRatio: boolean } | null = null;
+        for (const r of pool2) {
+          const v = effOf(r);
+          if (!v) continue;
+          if (!best || v.e < best.e) best = { row: r, ...v };
+        }
+        if (best) bestByPlat.set(pid, best);
       }
       const plats = await db
         .select()
@@ -156,6 +187,7 @@ export const pricingRouter = createRouter({
           domain: plat?.domain ?? "",
           url: plat?.url ?? "",
           variant: pr.model,
+          groupName: pr.groupName,
           eff: e,
           isRatio,
           ratio: pr.ratio,

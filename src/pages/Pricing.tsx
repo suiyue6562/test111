@@ -16,7 +16,6 @@ export default function Pricing() {
   const { data: catalog } = trpc.pricing.catalog.useQuery();
   const [vendor, setVendor] = useState<string>("");
   const [model, setModel] = useState<string>("");
-  const [groupName, setGroupName] = useState("default");
   const [sort, setSort] = useState<SortKey>("ratioAsc");
   const [modelQuery, setModelQuery] = useState("");
   const visit = trpc.platform.visit.useMutation({
@@ -34,11 +33,6 @@ export default function Pricing() {
     if (!q) return models;
     return models.filter((m) => m.toLowerCase().includes(q));
   }, [models, modelQuery]);
-  // 当前模型的真实可用价格组（来自官网采集的目录）
-  const modelGroups = useMemo(() => {
-    if (!model) return [] as string[];
-    return modelEntries.find((m) => m.label === model)?.groups ?? [];
-  }, [modelEntries, model]);
 
   useEffect(() => {
     if (!vendor && vendors.length > 0) setVendor(vendors[0]);
@@ -46,17 +40,13 @@ export default function Pricing() {
   useEffect(() => {
     if (models.length > 0 && !models.includes(model)) setModel(models[0]);
   }, [models, model]);
-  // 模型切换时，价格组重置为该模型实际开放的第一组（default 优先）
-  useEffect(() => {
-    if (modelGroups.length > 0 && !modelGroups.includes(groupName)) setGroupName(modelGroups[0]);
-  }, [modelGroups, groupName]);
   // 切换供应商时清空模型搜索词
   useEffect(() => {
     setModelQuery("");
   }, [vendor]);
 
   const { data, isLoading } = trpc.pricing.table.useQuery(
-    { vendor, model, groupName, sort },
+    { vendor, model, sort },
     { enabled: !!vendor && !!model },
   );
   const { data: board, isLoading: boardLoading } = trpc.pricing.lowestBoard.useQuery();
@@ -187,22 +177,8 @@ export default function Pricing() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-muted-foreground w-12">价格组</span>
-          {(modelGroups.length > 0 ? modelGroups : ["default"]).map((g) => (
-            <Button
-              key={g}
-              size="sm"
-              variant={groupName === g ? "secondary" : "ghost"}
-              className="border"
-              onClick={() => setGroupName(g)}
-            >
-              {g === "default" ? "缺省用户组" : g}
-            </Button>
-          ))}
-        </div>
         <p className="text-[11px] text-muted-foreground">
-          价格来自各站官网公开接口（new-api/one-api），按模型实际开放的用户组计价；不同分组价格不同，最终以站点官网为准。
+          价格为各站「缺省用户组」的实际计费倍率（普通注册用户的真实价格）；无缺省组的站取最低价组并在表格中标注。价格来自各站官网公开接口，最终以站点官网为准。
         </p>
       </div>
 
@@ -257,7 +233,10 @@ export default function Pricing() {
                   </td>
                   <td className="p-3 font-semibold text-indigo-600 dark:text-indigo-400">
                     {it.isRatio ? `${fmtRatio(it.ratio)}x` : `￥${Number(it.shortCost).toFixed(3)}/次`}
-                    <div className="text-[10px] font-normal text-muted-foreground font-mono">{it.variant}</div>
+                    <div className="text-[10px] font-normal text-muted-foreground font-mono">
+                      {it.variant}
+                      {it.groupName !== "default" && <span className="ml-1 text-amber-600 dark:text-amber-400">组:{it.groupName}</span>}
+                    </div>
                   </td>
                   <td className="p-3">￥{Number(it.shortCost).toFixed(3)} / 次</td>
                   <td className="p-3">￥{Number(it.longCost).toFixed(3)} / 次</td>
