@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { ArrowUpDown, ExternalLink, MessageSquarePlus, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/providers/trpc";
 import { fmtLatency, vendorColor } from "@/lib/format";
@@ -17,6 +18,7 @@ export default function Pricing() {
   const [model, setModel] = useState<string>("");
   const [groupName, setGroupName] = useState("default");
   const [sort, setSort] = useState<SortKey>("ratioAsc");
+  const [modelQuery, setModelQuery] = useState("");
   const visit = trpc.platform.visit.useMutation({
     onSuccess: (d) => window.open(d.url, "_blank", "noopener"),
   });
@@ -26,6 +28,11 @@ export default function Pricing() {
     () => catalog?.find((c) => c.vendor === vendor)?.models ?? [],
     [catalog, vendor],
   );
+  const filteredModels = useMemo(() => {
+    const q = modelQuery.trim().toLowerCase();
+    if (!q) return models;
+    return models.filter((m) => m.toLowerCase().includes(q));
+  }, [models, modelQuery]);
 
   useEffect(() => {
     if (!vendor && vendors.length > 0) setVendor(vendors[0]);
@@ -33,6 +40,10 @@ export default function Pricing() {
   useEffect(() => {
     if (models.length > 0 && !models.includes(model)) setModel(models[0]);
   }, [models, model]);
+  // 切换供应商时清空模型搜索词
+  useEffect(() => {
+    setModelQuery("");
+  }, [vendor]);
 
   const { data, isLoading } = trpc.pricing.table.useQuery(
     { vendor, model, groupName, sort },
@@ -137,19 +148,34 @@ export default function Pricing() {
             </Button>
           ))}
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-muted-foreground w-12">模型</span>
-          {models.map((m) => (
-            <Button
-              key={m}
-              size="sm"
-              variant={model === m ? "secondary" : "ghost"}
-              className="border"
-              onClick={() => setModel(m)}
-            >
-              {m}
-            </Button>
-          ))}
+        <div className="flex items-start gap-2">
+          <span className="text-xs text-muted-foreground w-12 pt-2 shrink-0">模型</span>
+          <div className="flex-1 space-y-2">
+            {models.length > 12 && (
+              <Input
+                value={modelQuery}
+                onChange={(e) => setModelQuery(e.target.value)}
+                placeholder={`搜索 ${models.length} 个模型…`}
+                className="h-8 text-xs max-w-xs"
+              />
+            )}
+            <div className="flex items-center gap-2 flex-wrap max-h-40 overflow-y-auto pr-1">
+              {filteredModels.map((m) => (
+                <Button
+                  key={m}
+                  size="sm"
+                  variant={model === m ? "secondary" : "ghost"}
+                  className="border"
+                  onClick={() => setModel(m)}
+                >
+                  {m}
+                </Button>
+              ))}
+              {filteredModels.length === 0 && (
+                <span className="text-xs text-muted-foreground">无匹配模型</span>
+              )}
+            </div>
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground w-12">价格组</span>
