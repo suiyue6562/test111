@@ -4,6 +4,8 @@ import { TRPCError } from "@trpc/server";
 import {
   platforms,
   platformDailyStatus,
+  platformPrices,
+  platformProbes,
   reviews,
   favorites,
   visitLogs,
@@ -22,18 +24,22 @@ function dateStr(d: Date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** 组装平台卡片数据：30 天状态、可用率、平均延迟 */
+/** 组装平台卡片数据：30 天状态、可用率、平均延迟、7 天可用率、模型覆盖、最近 12 次探测 */
 async function withStats(db: ReturnType<typeof getDb>, rows: typeof platforms.$inferSelect[]) {
   if (rows.length === 0) return [];
   const since = new Date();
   since.setDate(since.getDate() - 29);
   const sinceStr = dateStr(since);
+  const since7 = new Date();
+  since7.setDate(since7.getDate() - 6);
+  const since7Str = dateStr(since7);
+  const ids = rows.map((r) => r.id);
   const stats = await db
     .select()
     .from(platformDailyStatus)
     .where(
       and(
-        inArray(platformDailyStatus.platformId, rows.map((r) => r.id)),
+        inArray(platformDailyStatus.platformId, ids),
         sql`${platformDailyStatus.date} >= ${sinceStr}`,
       ),
     );
@@ -43,6 +49,27 @@ async function withStats(db: ReturnType<typeof getDb>, rows: typeof platforms.$i
     arr.push(s);
     byPlatform.set(s.platformId, arr);
   }
+  // 模型覆盖数（来自价格采集）
+  const modelRows = await db
+    .select({ platformId: platformPrices.platformId, n: sql<number>`count(distinct ${platformPrices.model})` })
+    .from(platformPrices)
+    .where(inArray(platformPrices.platformId, ids))
+    .groupBy(platformPrices.platformId);
+  const modelCount = new Map(modelRows.map((r) => [r.platformId, Number(r.n)]));
+  // 最近 12 次探测
+  const probeRows = await db
+    .select()
+    .from(platformProbes)
+    .where(inArray(platformProbes.platformId, ids))
+    .orderBy(desc(platformProbes.id));
+  const probesByP = new Map<number, { status: "ok" | "slow" | "down" | "nodata"; latencyMs: number | null }[]>();
+  for (const pr of probeRows) {
+    const arr = probesByP.get(pr.platformId) ?? [];
+    if (arr.length < 12) {
+      arr.push({ status: pr.status, latencyMs: pr.latencyMs });
+      probesByP.set(pr.platformId, arr);
+    }
+  }
   return rows.map((p) => {
     const days = (byPlatform.get(p.id) ?? []).sort((a, b) =>
       a.date.localeCompare(b.date),
@@ -50,12 +77,16 @@ async function withStats(db: ReturnType<typeof getDb>, rows: typeof platforms.$i
     const measured = days.filter((d) => d.status !== "nodata");
     const okDays = measured.filter((d) => d.status === "ok").length;
     const uptime = measured.length > 0 ? (okDays / measured.length) * 100 : null;
+    const m7 = days.filter((d) => d.date >= since7Str && d.status !== "nodata");
+    const uptime7 = m7.length > 0 ? (m7.filter((d) => d.status === "ok").length / m7.length) * 100 : null;
     const lat = measured.filter((d) => d.latencyMs != null);
     const avgLatency =
       lat.length > 0
         ? Math.round(lat.reduce((a, b) => a + (b.latencyMs ?? 0), 0) / lat.length)
         : null;
-    return { ...p, daily: days, uptime, avgLatency };
+    // 探测点条按时间正序（旧→新）返回
+    const probes = (probesByP.get(p.id) ?? []).reverse();
+    return { ...p, daily: days, uptime, uptime7, avgLatency, modelCount: modelCount.get(p.id) ?? 0, probes };
   });
 }
 

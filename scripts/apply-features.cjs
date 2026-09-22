@@ -25,6 +25,9 @@ async function main() {
     ["adWeight", "ALTER TABLE platforms ADD COLUMN adWeight INT NOT NULL DEFAULT 0 AFTER isAd"],
     ["adExpireAt", "ALTER TABLE platforms ADD COLUMN adExpireAt TIMESTAMP NULL DEFAULT NULL AFTER adWeight"],
     ["autoClosed", "ALTER TABLE platforms ADD COLUMN autoClosed TINYINT(1) NOT NULL DEFAULT 0 AFTER adExpireAt"],
+    ["apiConfirmed", "ALTER TABLE platforms ADD COLUMN apiConfirmed TINYINT(1) NOT NULL DEFAULT 0 AFTER autoClosed"],
+    ["lastProbeAt", "ALTER TABLE platforms ADD COLUMN lastProbeAt TIMESTAMP NULL DEFAULT NULL AFTER apiConfirmed"],
+    ["lastProbeLatency", "ALTER TABLE platforms ADD COLUMN lastProbeLatency INT NULL DEFAULT NULL AFTER lastProbeAt"],
   ];
   for (const [col, sql] of adds) {
     if (await columnExists(conn, "platforms", col)) {
@@ -79,6 +82,17 @@ async function main() {
     createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`);
   console.log("[migrate] ad_inquiries 已就绪");
+
+  // platform_probes：每次探测的原始记录（卡片展示"最近 12 次状态"）
+  await conn.query(`CREATE TABLE IF NOT EXISTS platform_probes (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    platformId BIGINT UNSIGNED NOT NULL,
+    status ENUM('ok','slow','down','nodata') NOT NULL,
+    latencyMs INT NULL,
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX pp_platform_idx (platformId, id)
+  )`);
+  console.log("[migrate] platform_probes 已就绪");
   await conn.end();
   console.log("[migrate] done");
 }

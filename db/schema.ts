@@ -63,6 +63,10 @@ export const platforms = mysqlTable(
     adExpireAt: timestamp("adExpireAt"),
     // 因连续故障被系统自动隐藏（区别于管理员手动关闭），自动关闭的站仍继续探测以便恢复
     autoClosed: boolean("autoClosed").default(false).notNull(),
+    // 实测状态：API 接口经探测确认真实可用（最近一次探测结果）
+    apiConfirmed: boolean("apiConfirmed").default(false).notNull(),
+    lastProbeAt: timestamp("lastProbeAt"),
+    lastProbeLatency: int("lastProbeLatency"),
     ownerId: bigint("ownerId", { mode: "number", unsigned: true }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt")
@@ -97,6 +101,23 @@ export const platformDailyStatus = mysqlTable(
 );
 
 export type PlatformDailyStatus = typeof platformDailyStatus.$inferSelect;
+
+// ---------- 采集器运行记录 ----------
+export const platformProbes = mysqlTable(
+  "platform_probes",
+  {
+    id: serial("id").primaryKey(),
+    platformId: bigint("platformId", { mode: "number", unsigned: true }).notNull(),
+    status: mysqlEnum("status", ["ok", "slow", "down", "nodata"]).notNull(),
+    latencyMs: int("latencyMs"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => ({
+    platformIdx: index("pp_platform_idx").on(t.platformId, t.id),
+  }),
+);
+
+export type PlatformProbe = typeof platformProbes.$inferSelect;
 
 // ---------- 采集器运行记录 ----------
 export const collectorRuns = mysqlTable("collector_runs", {

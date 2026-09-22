@@ -43873,6 +43873,7 @@ __export(schema_exports, {
   forumPosts: () => forumPosts,
   platformDailyStatus: () => platformDailyStatus,
   platformPrices: () => platformPrices,
+  platformProbes: () => platformProbes,
   platforms: () => platforms,
   reviews: () => reviews,
   skrActivities: () => skrActivities,
@@ -48079,6 +48080,10 @@ var platforms = mysqlTable(
     adExpireAt: timestamp("adExpireAt"),
     // 因连续故障被系统自动隐藏（区别于管理员手动关闭），自动关闭的站仍继续探测以便恢复
     autoClosed: boolean4("autoClosed").default(false).notNull(),
+    // 实测状态：API 接口经探测确认真实可用（最近一次探测结果）
+    apiConfirmed: boolean4("apiConfirmed").default(false).notNull(),
+    lastProbeAt: timestamp("lastProbeAt"),
+    lastProbeLatency: int2("lastProbeLatency"),
     ownerId: bigint4("ownerId", { mode: "number", unsigned: true }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().notNull().$onUpdate(() => /* @__PURE__ */ new Date())
@@ -48100,6 +48105,19 @@ var platformDailyStatus = mysqlTable(
   },
   (t2) => ({
     uniq: uniqueIndex("pds_platform_date_uniq").on(t2.platformId, t2.date)
+  })
+);
+var platformProbes = mysqlTable(
+  "platform_probes",
+  {
+    id: serial("id").primaryKey(),
+    platformId: bigint4("platformId", { mode: "number", unsigned: true }).notNull(),
+    status: mysqlEnum("status", ["ok", "slow", "down", "nodata"]).notNull(),
+    latencyMs: int2("latencyMs"),
+    createdAt: timestamp("createdAt").defaultNow().notNull()
+  },
+  (t2) => ({
+    platformIdx: index("pp_platform_idx").on(t2.platformId, t2.id)
   })
 );
 var collectorRuns = mysqlTable("collector_runs", {
@@ -50471,9 +50489,13 @@ async function withStats(db, rows) {
   const since = /* @__PURE__ */ new Date();
   since.setDate(since.getDate() - 29);
   const sinceStr = dateStr(since);
+  const since7 = /* @__PURE__ */ new Date();
+  since7.setDate(since7.getDate() - 6);
+  const since7Str = dateStr(since7);
+  const ids = rows.map((r) => r.id);
   const stats = await db.select().from(platformDailyStatus).where(
     and(
-      inArray(platformDailyStatus.platformId, rows.map((r) => r.id)),
+      inArray(platformDailyStatus.platformId, ids),
       sql`${platformDailyStatus.date} >= ${sinceStr}`
     )
   );
@@ -50483,6 +50505,17 @@ async function withStats(db, rows) {
     arr.push(s);
     byPlatform.set(s.platformId, arr);
   }
+  const modelRows = await db.select({ platformId: platformPrices.platformId, n: sql`count(distinct ${platformPrices.model})` }).from(platformPrices).where(inArray(platformPrices.platformId, ids)).groupBy(platformPrices.platformId);
+  const modelCount = new Map(modelRows.map((r) => [r.platformId, Number(r.n)]));
+  const probeRows = await db.select().from(platformProbes).where(inArray(platformProbes.platformId, ids)).orderBy(desc(platformProbes.id));
+  const probesByP = /* @__PURE__ */ new Map();
+  for (const pr of probeRows) {
+    const arr = probesByP.get(pr.platformId) ?? [];
+    if (arr.length < 12) {
+      arr.push({ status: pr.status, latencyMs: pr.latencyMs });
+      probesByP.set(pr.platformId, arr);
+    }
+  }
   return rows.map((p) => {
     const days = (byPlatform.get(p.id) ?? []).sort(
       (a, b) => a.date.localeCompare(b.date)
@@ -50490,9 +50523,12 @@ async function withStats(db, rows) {
     const measured = days.filter((d) => d.status !== "nodata");
     const okDays = measured.filter((d) => d.status === "ok").length;
     const uptime = measured.length > 0 ? okDays / measured.length * 100 : null;
+    const m7 = days.filter((d) => d.date >= since7Str && d.status !== "nodata");
+    const uptime7 = m7.length > 0 ? m7.filter((d) => d.status === "ok").length / m7.length * 100 : null;
     const lat = measured.filter((d) => d.latencyMs != null);
     const avgLatency = lat.length > 0 ? Math.round(lat.reduce((a, b) => a + (b.latencyMs ?? 0), 0) / lat.length) : null;
-    return { ...p, daily: days, uptime, avgLatency };
+    const probes = (probesByP.get(p.id) ?? []).reverse();
+    return { ...p, daily: days, uptime, uptime7, avgLatency, modelCount: modelCount.get(p.id) ?? 0, probes };
   });
 }
 var sortEnum = external_exports.enum(["default", "uptime", "latency", "visits", "newest"]);

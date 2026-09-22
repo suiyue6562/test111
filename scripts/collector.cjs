@@ -227,6 +227,21 @@ async function probeOne(pool, p, date) {
       await pool.query("UPDATE platforms SET apiBaseUrl = ? WHERE id = ?", [r.base, p.id]);
       console.log(`[collector] ${p.name}: apiBaseUrl 自动纠正为 ${r.base}`);
     }
+    // 记录原始探测历史（保留最近 12 条）并更新平台实测状态
+    await pool.query(
+      "INSERT INTO platform_probes (platformId, status, latencyMs) VALUES (?, ?, ?)",
+      [p.id, dayStatus, r.latencyMs],
+    );
+    await pool.query(
+      `DELETE FROM platform_probes WHERE platformId = ? AND id NOT IN (
+         SELECT id FROM (SELECT id FROM platform_probes WHERE platformId = ? ORDER BY id DESC LIMIT 12) t
+       )`,
+      [p.id, p.id],
+    );
+    await pool.query(
+      "UPDATE platforms SET lastProbeAt = NOW(), lastProbeLatency = ?, apiConfirmed = ? WHERE id = ?",
+      [r.latencyMs, r.apiConfirmed ? 1 : 0, p.id],
+    );
     console.log(
       `[collector] ${p.name}: ${apiAlive ? "可达" : r.status === 404 ? "API未确认" : "不可达"} ${r.latencyMs ?? "-"}ms${r.apiConfirmed ? " [API已确认]" : ""}`,
     );

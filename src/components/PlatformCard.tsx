@@ -3,7 +3,7 @@ import { ExternalLink, MessageSquarePlus, Star, Scale } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import UptimeBar from "@/components/UptimeBar";
-import { fmtLatency, vendorColor } from "@/lib/format";
+import { fmtLatency, timeAgo, vendorColor } from "@/lib/format";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -27,7 +27,28 @@ export interface CardPlatform {
   uptime: number | null;
   avgLatency: number | null;
   daily: { date: string; status: "ok" | "slow" | "down" | "nodata"; latencyMs: number | null }[];
+  uptime7?: number | null;
+  modelCount?: number;
+  apiConfirmed?: boolean;
+  lastProbeAt?: Date | string | null;
+  lastProbeLatency?: number | null;
+  probes?: { status: "ok" | "slow" | "down" | "nodata"; latencyMs: number | null }[];
 }
+
+/** 实测状态分级（对齐行业惯例）：已实测 / 持续监测 / 尚未验证 */
+function testMeta(p: CardPlatform): { label: string; cls: string } {
+  if (p.apiConfirmed) return { label: "已实测", cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" };
+  if (p.status === "operational" || p.status === "slow" || p.status === "unknown")
+    return { label: "持续监测", cls: "bg-sky-500/10 text-sky-600 dark:text-sky-400" };
+  return { label: "尚未验证", cls: "bg-muted text-muted-foreground" };
+}
+
+const PROBE_DOT: Record<string, string> = {
+  ok: "bg-emerald-500",
+  slow: "bg-amber-400",
+  down: "bg-rose-500",
+  nodata: "bg-muted-foreground/30",
+};
 
 const STATUS_META: Record<Status, { label: string; cls: string; dot: string }> = {
   operational: { label: "正常", cls: "border-emerald-500/30 text-emerald-600 dark:text-emerald-400", dot: "bg-emerald-500" },
@@ -142,6 +163,27 @@ export default function PlatformCard({
           </span>
         </div>
         <UptimeBar days={p.daily} />
+        {/* 实测状态 + 最近检测 + 7天可用率 + 模型覆盖 */}
+        <div className="flex items-center gap-1.5 mt-2 text-[11px] text-muted-foreground flex-wrap">
+          <span className={`px-1.5 py-0.5 rounded ${testMeta(p).cls}`}>{testMeta(p).label}</span>
+          <span>近7天 {p.uptime7 != null ? `${p.uptime7.toFixed(0)}%` : "—"}</span>
+          <span>·</span>
+          <span>{p.modelCount ? `${p.modelCount} 模型` : "模型 —"}</span>
+          {p.lastProbeAt && (
+            <>
+              <span>·</span>
+              <span>检测 {timeAgo(p.lastProbeAt)}</span>
+            </>
+          )}
+          {/* 最近 12 次探测点条（旧→新） */}
+          {p.probes && p.probes.length > 0 && (
+            <span className="flex items-center gap-0.5 ml-auto" title="最近 12 次探测状态">
+              {p.probes.map((pr, i) => (
+                <span key={i} className={`w-1.5 h-1.5 rounded-full ${PROBE_DOT[pr.status]}`} />
+              ))}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="flex gap-2 mt-auto">
