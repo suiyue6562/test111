@@ -98,7 +98,7 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
               className={({ isActive }) =>
                 `flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors ${
                   isActive
-                    ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-medium"
+                    ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 font-medium"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`
               }
@@ -129,7 +129,7 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
                 to="/forum"
                 end
                 className={({ isActive }) =>
-                  `block rounded-md px-2 py-1.5 text-[13px] ${isActive ? "text-indigo-600 dark:text-indigo-400 font-medium" : "text-muted-foreground hover:text-foreground"}`
+                  `block rounded-md px-2 py-1.5 text-[13px] ${isActive ? "text-orange-600 dark:text-orange-400 font-medium" : "text-muted-foreground hover:text-foreground"}`
                 }
               >
                 全部帖子
@@ -139,7 +139,7 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
                   key={c.slug}
                   to={`/forum/c/${c.slug}`}
                   className={({ isActive }) =>
-                    `block rounded-md px-2 py-1.5 text-[13px] ${isActive ? "text-indigo-600 dark:text-indigo-400 font-medium" : "text-muted-foreground hover:text-foreground"}`
+                    `block rounded-md px-2 py-1.5 text-[13px] ${isActive ? "text-orange-600 dark:text-orange-400 font-medium" : "text-muted-foreground hover:text-foreground"}`
                   }
                 >
                   {c.name}
@@ -153,7 +153,7 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
             className={({ isActive }) =>
               `flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm ${
                 isActive
-                  ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-medium"
+                  ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 font-medium"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
               }`
             }
@@ -195,7 +195,7 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
               value={kw}
               onChange={(e) => setKw(e.target.value)}
               placeholder={t("search")}
-              className="w-full h-9 rounded-full border bg-background pl-9 pr-4 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+              className="w-full h-9 rounded-full border bg-background pl-9 pr-4 text-sm outline-none focus:ring-2 focus:ring-orange-500/30"
             />
           </form>
           <Button
@@ -233,7 +233,7 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
               <Button variant="outline" className="rounded-full" onClick={() => navigate("/login")}>
                 {t("login")}
               </Button>
-              <Button className="rounded-full bg-indigo-600 hover:bg-indigo-700" onClick={() => navigate("/register")}>
+              <Button className="rounded-full bg-orange-600 hover:bg-orange-700" onClick={() => navigate("/register")}>
                 {t("register")}
               </Button>
             </div>

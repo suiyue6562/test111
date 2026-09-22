@@ -43,7 +43,7 @@ export default function ForumPost() {
       <div className="rounded-xl border bg-card p-6">
         <div className="flex items-center gap-2 flex-wrap">
           {post.pinned && (
-            <Badge className="bg-indigo-600 gap-0.5">
+            <Badge className="bg-orange-600 gap-0.5">
               <Pin className="w-3 h-3" /> 置顶
             </Badge>
           )}
@@ -74,7 +74,7 @@ export default function ForumPost() {
               className="flex-1"
             />
             <Button
-              className="bg-indigo-600 hover:bg-indigo-700 self-end"
+              className="bg-orange-600 hover:bg-orange-700 self-end"
               disabled={addComment.isPending || !comment.trim()}
               onClick={() => addComment.mutate({ postId, content: comment.trim() })}
             >

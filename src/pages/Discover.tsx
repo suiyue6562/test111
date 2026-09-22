@@ -88,7 +88,7 @@ export default function Discover() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="搜索平台名、域名、描述、模型…"
-              className="w-full h-9 rounded-full border bg-background pl-9 pr-4 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+              className="w-full h-9 rounded-full border bg-background pl-9 pr-4 text-sm outline-none focus:ring-2 focus:ring-orange-500/30"
             />
           </form>
         </div>
@@ -150,10 +150,10 @@ export default function Discover() {
 
       {/* 对比栏 */}
       <div className="rounded-xl border bg-card p-4 flex items-center gap-3 flex-wrap">
-        <Scale className="w-4 h-4 text-indigo-500" />
+        <Scale className="w-4 h-4 text-orange-500" />
         <span className="text-sm font-medium">对比选择</span>
         <span className="text-sm text-muted-foreground">
-          已选 <b className="text-indigo-600 dark:text-indigo-400">{compareIds.length}</b> 个平台（至少 2 个，最多 6 个）
+          已选 <b className="text-orange-600 dark:text-orange-400">{compareIds.length}</b> 个平台（至少 2 个，最多 6 个）
         </span>
         <div className="flex-1" />
         {compareIds.length > 0 && (
@@ -163,7 +163,7 @@ export default function Discover() {
         )}
         <Button
           size="sm"
-          className="bg-indigo-600 hover:bg-indigo-700"
+          className="bg-orange-600 hover:bg-orange-700"
           disabled={compareIds.length < 2}
           onClick={() => navigate(`/compare?ids=${compareIds.join(",")}`)}
         >

@@ -23,7 +23,7 @@ export default function SkrMy() {
         </Button>
         <div>
           <h1 className="text-lg font-bold flex items-center gap-2">
-            <Package className="w-5 h-5 text-indigo-500" /> 我的码包
+            <Package className="w-5 h-5 text-orange-500" /> 我的码包
           </h1>
           <p className="text-sm text-muted-foreground">你领取到的所有兑换码</p>
         </div>

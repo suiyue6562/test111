@@ -87,13 +87,13 @@ export default function Forum() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="搜索帖子…"
-              className="h-9 w-52 rounded-full border bg-background pl-9 pr-4 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+              className="h-9 w-52 rounded-full border bg-background pl-9 pr-4 text-sm outline-none focus:ring-2 focus:ring-orange-500/30"
             />
           </form>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button
-                className="bg-indigo-600 hover:bg-indigo-700"
+                className="bg-orange-600 hover:bg-orange-700"
                 onClick={(e) => {
                   if (!isAuthenticated) {
                     e.preventDefault();
@@ -137,7 +137,7 @@ export default function Forum() {
                   rows={8}
                 />
                 <Button
-                  className="w-full bg-indigo-600 hover:bg-indigo-700"
+                  className="w-full bg-orange-600 hover:bg-orange-700"
                   disabled={createPost.isPending || title.trim().length < 2 || content.trim().length < 5}
                   onClick={() =>
                     createPost.mutate({
@@ -176,7 +176,7 @@ export default function Forum() {
             >
               <div className="flex items-center gap-2 flex-wrap">
                 {p.pinned && (
-                  <Badge className="bg-indigo-600 gap-0.5">
+                  <Badge className="bg-orange-600 gap-0.5">
                     <Pin className="w-3 h-3" /> 置顶
                   </Badge>
                 )}
@@ -185,7 +185,7 @@ export default function Forum() {
                   <Badge key={tg} variant="outline" className="text-[11px]">{tg}</Badge>
                 ))}
               </div>
-              <h3 className="font-semibold mt-2 hover:text-indigo-600 dark:hover:text-indigo-400">
+              <h3 className="font-semibold mt-2 hover:text-orange-600 dark:hover:text-orange-400">
                 {p.title}
               </h3>
               <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">

@@ -106,7 +106,7 @@ export default function PlatformCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1 overflow-hidden">
           <button
-            className="font-semibold text-[15px] hover:text-indigo-600 dark:hover:text-indigo-400 truncate block text-left max-w-full"
+            className="font-semibold text-[15px] hover:text-orange-600 dark:hover:text-orange-400 truncate block text-left max-w-full"
             onClick={() => navigate(`/site/${p.domain}`)}
           >
             {p.name}
@@ -164,7 +164,7 @@ export default function PlatformCard({
           {p.priceHints.map((h) => (
             <span
               key={h.label}
-              className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-medium"
+              className="text-[11px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-600 dark:text-orange-400 font-medium"
             >
               {h.label} {fmtRatio(h.ratio)}x
             </span>
@@ -191,7 +191,7 @@ export default function PlatformCard({
 
       <div>
         <div className="flex justify-between text-xs mb-1.5">
-          <span className="text-indigo-600 dark:text-indigo-400">
+          <span className="text-orange-600 dark:text-orange-400">
             30天 {p.uptime != null ? `${p.uptime.toFixed(1)}%` : "—"} 正常
           </span>
           <span className="text-muted-foreground">

@@ -143,7 +143,7 @@ export function AdPopup() {
           ))}
         </div>
         <Button
-          className="w-full bg-indigo-600 hover:bg-indigo-700"
+          className="w-full bg-orange-600 hover:bg-orange-700"
           disabled={visit.isPending}
           onClick={() => {
             visit.mutate({ platformId: ad.id, source: "ad-popup" });

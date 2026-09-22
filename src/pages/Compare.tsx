@@ -55,7 +55,7 @@ export default function Compare() {
               <th className="text-left p-4 text-muted-foreground font-medium w-32">项目</th>
               {data?.map((p) => (
                 <th key={p.id} className="text-left p-4">
-                  <button className="font-semibold hover:text-indigo-600" onClick={() => navigate(`/site/${p.domain}`)}>
+                  <button className="font-semibold hover:text-orange-600" onClick={() => navigate(`/site/${p.domain}`)}>
                     {p.name}
                   </button>
                   <div className="text-xs text-muted-foreground font-normal">{p.domain}</div>

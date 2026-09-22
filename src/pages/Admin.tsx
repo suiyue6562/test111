@@ -142,7 +142,7 @@ function PlatformForm({
         )}
       </div>
       <Button
-        className="w-full bg-indigo-600 hover:bg-indigo-700"
+        className="w-full bg-orange-600 hover:bg-orange-700"
         disabled={pending || !f.name || !f.domain || !f.url}
         onClick={() =>
           onSubmit({
@@ -278,7 +278,7 @@ export default function Admin() {
     <div className="space-y-5">
       <div className="rounded-xl border bg-card p-5">
         <h1 className="text-lg font-bold flex items-center gap-2">
-          <Shield className="w-5 h-5 text-indigo-500" /> 管理后台
+          <Shield className="w-5 h-5 text-orange-500" /> 管理后台
         </h1>
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mt-4">
           {[
@@ -319,7 +319,7 @@ export default function Admin() {
           <div className="rounded-xl border bg-card p-4 space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-sm text-muted-foreground">共 {plats?.length ?? 0} 个平台</span>
-              <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={() => { setEditPlat(null); setEditOpen(true); }}>
+              <Button size="sm" className="bg-orange-600 hover:bg-orange-700" onClick={() => { setEditPlat(null); setEditOpen(true); }}>
                 <Plus className="w-4 h-4 mr-1" /> 新增平台
               </Button>
             </div>
@@ -465,7 +465,7 @@ export default function Admin() {
           <div className="rounded-xl border bg-card p-4 space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-sm text-muted-foreground">共 {acts?.length ?? 0} 个活动</span>
-              <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={() => setActOpen(true)}>
+              <Button size="sm" className="bg-orange-600 hover:bg-orange-700" onClick={() => setActOpen(true)}>
                 <Plus className="w-4 h-4 mr-1" /> 创建活动
               </Button>
             </div>
@@ -529,8 +529,8 @@ export default function Admin() {
               { label: "偏慢", value: colOverview?.statusDist.slow, cls: "text-amber-500" },
               { label: "故障", value: colOverview?.statusDist.down, cls: "text-red-500" },
               { label: "API 未确认", value: colOverview?.statusDist.unknown, cls: "text-muted-foreground" },
-              { label: "价格记录", value: colOverview?.priceTotal, cls: "text-indigo-500" },
-              { label: "覆盖站点", value: colOverview?.priceSites, cls: "text-indigo-500" },
+              { label: "价格记录", value: colOverview?.priceTotal, cls: "text-orange-500" },
+              { label: "覆盖站点", value: colOverview?.priceSites, cls: "text-orange-500" },
             ].map((s) => (
               <div key={s.label} className="rounded-xl border bg-card p-3">
                 <div className="text-xs text-muted-foreground">{s.label}</div>
@@ -542,7 +542,7 @@ export default function Admin() {
           {/* 最近运行时间 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="rounded-xl border bg-card p-4 flex items-center gap-3">
-              <Radar className="w-5 h-5 text-indigo-500 shrink-0" />
+              <Radar className="w-5 h-5 text-orange-500 shrink-0" />
               <div>
                 <div className="text-sm font-medium">站点探测（每小时）</div>
                 <div className="text-xs text-muted-foreground mt-0.5">
@@ -553,7 +553,7 @@ export default function Admin() {
               </div>
             </div>
             <div className="rounded-xl border bg-card p-4 flex items-center gap-3">
-              <Database className="w-5 h-5 text-indigo-500 shrink-0" />
+              <Database className="w-5 h-5 text-orange-500 shrink-0" />
               <div>
                 <div className="text-sm font-medium">价格采集（每 24 小时）</div>
                 <div className="text-xs text-muted-foreground mt-0.5">
@@ -708,7 +708,7 @@ export default function Admin() {
                   return (
                     <TableRow key={r.id}>
                       <TableCell>
-                        <a href={r.platformDomain ? `/site/${r.platformDomain}` : "#"} className="hover:text-indigo-600">
+                        <a href={r.platformDomain ? `/site/${r.platformDomain}` : "#"} className="hover:text-orange-600">
                           {r.platformName}
                         </a>
                         <div className="text-xs text-muted-foreground">{r.platformDomain}</div>
@@ -814,7 +814,7 @@ export default function Admin() {
                     </TableCell>
                     <TableCell>{a.adWeight}</TableCell>
                     <TableCell>{a.imp7}</TableCell>
-                    <TableCell className="text-indigo-500">{a.clk7}</TableCell>
+                    <TableCell className="text-orange-500">{a.clk7}</TableCell>
                     <TableCell className="font-semibold text-emerald-500">
                       {a.ctr7 != null ? `${a.ctr7}%` : "—"}
                     </TableCell>
@@ -873,7 +873,7 @@ export default function Admin() {
                 onChange={(e) => setCampForm({ ...campForm, expireAt: e.target.value })}
               />
               <Button
-                className="bg-indigo-600 hover:bg-indigo-700"
+                className="bg-orange-600 hover:bg-orange-700"
                 disabled={createCamp.isPending || !campForm.platformId || !campForm.position}
                 onClick={() =>
                   createCamp.mutate({
@@ -914,7 +914,7 @@ export default function Admin() {
                     </TableCell>
                     <TableCell>{c.weight}</TableCell>
                     <TableCell>{c.imp7}</TableCell>
-                    <TableCell className="text-indigo-500">{c.clk7}</TableCell>
+                    <TableCell className="text-orange-500">{c.clk7}</TableCell>
                     <TableCell className="font-semibold text-emerald-500">
                       {c.ctr7 != null ? `${c.ctr7}%` : "—"}
                     </TableCell>
@@ -1036,7 +1036,7 @@ export default function Admin() {
               <Input placeholder="长文 0.15" value={priceForm.longCost} onChange={(e) => setPriceForm({ ...priceForm, longCost: e.target.value })} />
             </div>
             <Button
-              size="sm" className="bg-indigo-600 hover:bg-indigo-700"
+              size="sm" className="bg-orange-600 hover:bg-orange-700"
               disabled={upsertPrice.isPending || !priceForm.model || !priceForm.ratio}
               onClick={() => {
                 if (!pricePlat) return;
@@ -1113,7 +1113,7 @@ export default function Admin() {
               </SelectContent>
             </Select>
             <Button
-              className="w-full bg-indigo-600 hover:bg-indigo-700"
+              className="w-full bg-orange-600 hover:bg-orange-700"
               disabled={createAct.isPending || actForm.title.length < 2 || !actForm.startAt}
               onClick={() =>
                 createAct.mutate({

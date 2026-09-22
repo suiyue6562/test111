@@ -21,13 +21,13 @@ export default function UserCenter() {
   return (
     <div className="space-y-5">
       <div className="rounded-xl border bg-card p-6 flex items-center gap-4">
-        <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-white text-xl font-bold">
+        <div className="w-14 h-14 rounded-full bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center text-white text-xl font-bold">
           {(user.name ?? "U")[0].toUpperCase()}
         </div>
         <div>
           <h1 className="text-lg font-bold flex items-center gap-2">
             {user.name}
-            {user.role === "admin" && <Badge className="bg-indigo-600">管理员</Badge>}
+            {user.role === "admin" && <Badge className="bg-orange-600">管理员</Badge>}
           </h1>
           <p className="text-sm text-muted-foreground">
             注册于 {fmtDateTime(user.createdAt)} · 最近登录 {fmtDateTime(user.lastSignInAt)}

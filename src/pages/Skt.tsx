@@ -33,7 +33,7 @@ export default function Skt() {
       <div className="rounded-xl border bg-card p-6 space-y-4">
         <div>
           <h1 className="text-lg font-bold flex items-center gap-2">
-            <KeyRound className="w-5 h-5 text-indigo-500" /> SKT · Key 可用性检测
+            <KeyRound className="w-5 h-5 text-orange-500" /> SKT · Key 可用性检测
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             输入任意中转站的 API 地址与 Key，实时检测连通性、延迟与可用模型列表。
@@ -59,7 +59,7 @@ export default function Skt() {
           </div>
         </div>
         <Button
-          className="bg-indigo-600 hover:bg-indigo-700"
+          className="bg-orange-600 hover:bg-orange-700"
           disabled={test.isPending || baseUrl.length < 4 || apiKey.length < 3}
           onClick={() => {
             setResult(null);
@@ -119,7 +119,7 @@ export default function Skt() {
           {result.ok && (
             <>
               <div className="text-sm">
-                可用模型 <b className="text-indigo-600 dark:text-indigo-400">{result.modelCount}</b> 个
+                可用模型 <b className="text-orange-600 dark:text-orange-400">{result.modelCount}</b> 个
               </div>
               <div className="flex gap-1.5 flex-wrap">
                 {result.models?.map((m) => (

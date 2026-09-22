@@ -50,7 +50,7 @@ export default function ComplianceGate() {
           <Button variant="outline" className="flex-1" onClick={() => { window.location.href = "about:blank"; }}>
             离开本站
           </Button>
-          <Button className="flex-1 bg-indigo-600 hover:bg-indigo-700" onClick={accept}>
+          <Button className="flex-1 bg-orange-600 hover:bg-orange-700" onClick={accept}>
             我已阅读并确认，继续使用
           </Button>
         </div>

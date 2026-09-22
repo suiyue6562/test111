@@ -130,7 +130,7 @@ export default function Home() {
           {board && board.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <Tags className="w-4 h-4 text-indigo-500" />
+                <Tags className="w-4 h-4 text-orange-500" />
                 <h2 className="text-base font-semibold">全网最低价</h2>
                 <span className="text-xs text-muted-foreground">热门模型价格洼地，数据每小时更新</span>
                 <Button
@@ -157,7 +157,7 @@ export default function Home() {
                     </div>
                     <div className="flex items-end justify-between mt-2">
                       <span className="text-sm font-medium truncate">{b.minPlatformName}</span>
-                      <span className="text-base font-bold text-indigo-600 dark:text-indigo-400 shrink-0">
+                      <span className="text-base font-bold text-orange-600 dark:text-orange-400 shrink-0">
                         {b.isRatio ? `${b.minEff.toFixed(2)}x` : `￥${b.minEff.toFixed(3)}/次`}
                       </span>
                     </div>

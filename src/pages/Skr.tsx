@@ -36,7 +36,7 @@ export default function Skr() {
       <div className="rounded-xl border bg-card p-5 flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-lg font-bold flex items-center gap-2">
-            <Gift className="w-5 h-5 text-indigo-500" /> 发码活动
+            <Gift className="w-5 h-5 text-orange-500" /> 发码活动
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             各站长发放的兑换码福利，先到先得
@@ -45,7 +45,7 @@ export default function Skr() {
         <div className="flex items-center gap-6 text-sm">
           <div>活动总数 <b className="text-lg">{data?.length ?? 0}</b></div>
           <div>进行中 <b className="text-lg text-emerald-600">{active}</b></div>
-          <div>总码量 <b className="text-lg text-indigo-600 dark:text-indigo-400">{totalCodes}</b></div>
+          <div>总码量 <b className="text-lg text-orange-600 dark:text-orange-400">{totalCodes}</b></div>
           {isAuthenticated && (
             <Button variant="outline" onClick={() => navigate("/skr/my")}>
               <Package className="w-4 h-4 mr-1" /> 我的码包
@@ -99,7 +99,7 @@ export default function Skr() {
                   </div>
                 </div>
                 <Button
-                  className="w-full bg-indigo-600 hover:bg-indigo-700"
+                  className="w-full bg-orange-600 hover:bg-orange-700"
                   disabled={a.status !== "active" || claim.isPending}
                   onClick={() =>
                     isAuthenticated

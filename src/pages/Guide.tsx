@@ -44,7 +44,7 @@ export default function Guide() {
         {SECTIONS.map((s) => (
           <div key={s.title} className="rounded-xl border bg-card p-5">
             <h3 className="font-semibold flex items-center gap-2">
-              <s.icon className="w-4 h-4 text-indigo-500" /> {s.title}
+              <s.icon className="w-4 h-4 text-orange-500" /> {s.title}
             </h3>
             <p className="text-sm text-muted-foreground mt-2 leading-6">{s.body}</p>
           </div>

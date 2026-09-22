@@ -45,7 +45,7 @@ export default function Advertise() {
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       {/* Hero */}
-      <div className="rounded-xl border bg-gradient-to-br from-indigo-500/10 via-card to-amber-500/10 p-8 text-center space-y-3">
+      <div className="rounded-xl border bg-gradient-to-br from-orange-500/10 via-card to-amber-500/10 p-8 text-center space-y-3">
         <div className="flex justify-center">
           <Megaphone className="w-10 h-10 text-amber-500" />
         </div>
@@ -60,7 +60,7 @@ export default function Advertise() {
             { label: "7天访问点击", value: data?.visits7d, icon: MousePointerClick },
           ].map((s) => (
             <div key={s.label} className="text-center">
-              <div className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
+              <div className="text-xl font-bold text-orange-600 dark:text-orange-400">
                 {isLoading ? "…" : s.value}
               </div>
               <div className="text-xs text-muted-foreground flex items-center gap-1 justify-center">
@@ -88,7 +88,7 @@ export default function Advertise() {
                 <div key={z.key} className="rounded-xl border bg-card p-4 space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 font-semibold">
-                      <z.icon className="w-4 h-4 text-indigo-500" /> {z.name}
+                      <z.icon className="w-4 h-4 text-orange-500" /> {z.name}
                     </div>
                     <Badge variant={full ? "secondary" : "default"} className={full ? "" : "bg-emerald-600 hover:bg-emerald-600"}>
                       {full ? "已满" : `空闲 ${st ? st.capacity - st.occupied : ""}/${st?.capacity ?? ""}`}
@@ -122,7 +122,7 @@ export default function Advertise() {
             { n: "3", t: "上线投放", d: "素材确认后即时上线，后台实时查看效果数据" },
           ].map((s) => (
             <div key={s.n} className="flex gap-3">
-              <div className="w-7 h-7 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold shrink-0">
+              <div className="w-7 h-7 rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400 flex items-center justify-center font-bold shrink-0">
                 {s.n}
               </div>
               <div>
@@ -177,7 +177,7 @@ export default function Advertise() {
               onChange={(e) => setForm({ ...form, message: e.target.value })}
             />
             <Button
-              className="w-full bg-indigo-600 hover:bg-indigo-700"
+              className="w-full bg-orange-600 hover:bg-orange-700"
               disabled={submit.isPending || !form.name || form.contact.length < 3 || form.positions.length === 0}
               onClick={() =>
                 submit.mutate({

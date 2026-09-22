@@ -77,7 +77,7 @@ export default function Login({ defaultTab = "login" }: { defaultTab?: "login" |
                 onKeyDown={(e) => e.key === "Enter" && login.mutate({ username, password })}
               />
               <Button
-                className="w-full bg-indigo-600 hover:bg-indigo-700"
+                className="w-full bg-orange-600 hover:bg-orange-700"
                 disabled={pending || !username || !password}
                 onClick={() => login.mutate({ username, password })}
               >
@@ -99,7 +99,7 @@ export default function Login({ defaultTab = "login" }: { defaultTab?: "login" |
                 autoComplete="new-password"
               />
               <Button
-                className="w-full bg-indigo-600 hover:bg-indigo-700"
+                className="w-full bg-orange-600 hover:bg-orange-700"
                 disabled={pending || username.length < 3 || password.length < 6}
                 onClick={() => register.mutate({ username, password })}
               >

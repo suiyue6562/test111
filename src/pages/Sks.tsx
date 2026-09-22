@@ -39,7 +39,7 @@ export default function Sks() {
       <div className="rounded-xl border bg-card p-6 space-y-4">
         <div>
           <h1 className="text-lg font-bold flex items-center gap-2">
-            <UploadCloud className="w-5 h-5 text-indigo-500" /> 收录申请 · 站点提交
+            <UploadCloud className="w-5 h-5 text-orange-500" /> 收录申请 · 站点提交
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             提交你的 API 中转站，审核通过后将收录入库并开启运行状态监控。
@@ -71,7 +71,7 @@ export default function Sks() {
               />
             </div>
             <Button
-              className="bg-indigo-600 hover:bg-indigo-700"
+              className="bg-orange-600 hover:bg-orange-700"
               disabled={submit.isPending || !url || apiKey.length < 8}
               onClick={() => submit.mutate({ url, apiKey })}
             >
@@ -79,7 +79,7 @@ export default function Sks() {
             </Button>
           </div>
         ) : (
-          <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => navigate("/login")}>
+          <Button className="bg-orange-600 hover:bg-orange-700" onClick={() => navigate("/login")}>
             请先登录后再提交
           </Button>
         )}

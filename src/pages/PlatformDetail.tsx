@@ -167,7 +167,7 @@ export default function PlatformDetail() {
               <Heart className={`w-4 h-4 mr-1 ${data.isFav ? "fill-rose-500 text-rose-500" : ""}`} />
               {data.isFav ? "已收藏" : "收藏"}
             </Button>
-            <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => visit.mutate({ platformId: p.id })}>
+            <Button className="bg-orange-600 hover:bg-orange-700" onClick={() => visit.mutate({ platformId: p.id })}>
               <ExternalLink className="w-4 h-4 mr-1" /> 访问站点
             </Button>
           </div>
@@ -278,7 +278,7 @@ export default function PlatformDetail() {
                     <span className="text-xs text-muted-foreground">{rows.length} 个模型</span>
                     <span className="text-xs text-muted-foreground ml-auto">
                       {minRatio != null ? (
-                        <>最低 <b className="text-indigo-600 dark:text-indigo-400">{minRatio.toFixed(2)}x</b></>
+                        <>最低 <b className="text-orange-600 dark:text-orange-400">{minRatio.toFixed(2)}x</b></>
                       ) : (
                         "按次计费"
                       )}
@@ -303,7 +303,7 @@ export default function PlatformDetail() {
                             {showGroupCol && (
                               <td className="px-3 py-2 text-xs">{pr.groupName === "default" ? "缺省" : pr.groupName}</td>
                             )}
-                            <td className="px-3 py-2 font-semibold text-indigo-600 dark:text-indigo-400">
+                            <td className="px-3 py-2 font-semibold text-orange-600 dark:text-orange-400">
                               {Number(pr.ratio) === 0 ? "按次" : `${Number(pr.ratio).toFixed(4)}x`}
                             </td>
                             <td className="px-3 py-2">￥{Number(pr.shortCost).toFixed(3)}</td>
@@ -370,7 +370,7 @@ export default function PlatformDetail() {
               rows={3}
             />
             <Button
-              className="bg-indigo-600 hover:bg-indigo-700"
+              className="bg-orange-600 hover:bg-orange-700"
               disabled={submitReview.isPending || content.trim().length < 5}
               onClick={() => submitReview.mutate({ platformId: p.id, rating, content })}
             >
@@ -416,7 +416,7 @@ export default function PlatformDetail() {
             {claimedCode}
           </div>
           <Button
-            className="w-full bg-indigo-600 hover:bg-indigo-700"
+            className="w-full bg-orange-600 hover:bg-orange-700"
             onClick={() => {
               if (claimedCode) navigator.clipboard.writeText(claimedCode).then(() => toast.success("已复制"));
             }}
