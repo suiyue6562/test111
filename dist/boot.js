@@ -51011,8 +51011,12 @@ var pricingRouter = createRouter({
       });
       families.set(e.family, arr);
     }
-    const FAMILY_ORDER = ["OpenAI", "Claude", "Gemini", "DeepSeek", "Qwen", "Kimi", "GLM", "xAI"];
-    return [...families.entries()].sort((a, b) => FAMILY_ORDER.indexOf(a[0]) + 99 - (FAMILY_ORDER.indexOf(b[0]) + 99)).map(([vendor, models]) => ({ vendor, models: models.sort((a, b) => a.label.localeCompare(b.label)) }));
+    const FAMILY_ORDER = ["OpenAI", "Claude", "Gemini", "DeepSeek", "Qwen", "Kimi", "GLM", "xAI", "\u8C46\u5305", "MiniMax", "\u6DF7\u5143"];
+    return [...families.entries()].sort((a, b) => {
+      const ia = FAMILY_ORDER.indexOf(a[0]);
+      const ib = FAMILY_ORDER.indexOf(b[0]);
+      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    }).map(([vendor, models]) => ({ vendor, models: models.sort((a, b) => a.label.localeCompare(b.label)) }));
   }),
   /**
    * 价格表：canonical 模型（label）→ 全部原始型号变体，按站点聚合。

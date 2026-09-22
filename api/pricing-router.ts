@@ -102,9 +102,13 @@ export const pricingRouter = createRouter({
       });
       families.set(e.family, arr);
     }
-    const FAMILY_ORDER = ["OpenAI", "Claude", "Gemini", "DeepSeek", "Qwen", "Kimi", "GLM", "xAI"];
+    const FAMILY_ORDER = ["OpenAI", "Claude", "Gemini", "DeepSeek", "Qwen", "Kimi", "GLM", "xAI", "豆包", "MiniMax", "混元"];
     return [...families.entries()]
-      .sort((a, b) => (FAMILY_ORDER.indexOf(a[0]) + 99) - (FAMILY_ORDER.indexOf(b[0]) + 99))
+      .sort((a, b) => {
+        const ia = FAMILY_ORDER.indexOf(a[0]);
+        const ib = FAMILY_ORDER.indexOf(b[0]);
+        return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+      })
       .map(([vendor, models]) => ({ vendor, models: models.sort((a, b) => a.label.localeCompare(b.label)) }));
   }),
 
