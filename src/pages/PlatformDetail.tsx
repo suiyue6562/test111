@@ -329,7 +329,8 @@ export default function PlatformDetail() {
                                     title={`全网最低：${cmp.minPlatformName}（${cmp.minDomain}）`}
                                   >
                                     第 {cmp.rank} 低 / {cmp.total} 站
-                                    {pct != null && pct > 0 && ` · 高 ${pct}%`}
+                                    {pct != null && pct > 0 && pct <= 1000 && ` · 高 ${pct}%`}
+                                    {pct != null && pct > 1000 && " · 远高于全网最低"}
                                   </span>
                                 );
                               })()}
