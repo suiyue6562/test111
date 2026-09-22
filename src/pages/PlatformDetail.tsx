@@ -11,7 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import UptimeBar from "@/components/UptimeBar";
-import { fmtLatency, fmtDate, timeAgo, vendorColor } from "@/lib/format";
+import { fmtLatency, fmtDate, timeAgo, vendorColor, aiSummary, visibleTags } from "@/lib/format";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -149,12 +149,12 @@ export default function PlatformDetail() {
               {p.vendors.map((v) => (
                 <span key={v} className={`text-[11px] px-1.5 py-0.5 rounded ${vendorColor(v)}`}>{v}</span>
               ))}
-              {p.tags.map((tg) => (
+              {visibleTags(p.tags).map((tg) => (
                 <Badge key={tg} variant="secondary" className="text-[11px]">{tg}</Badge>
               ))}
             </div>
-            {p.description && (
-              <p className="text-sm text-muted-foreground mt-3 max-w-2xl">{p.description}</p>
+            {aiSummary(p.description) && (
+              <p className="text-sm text-muted-foreground mt-3 max-w-2xl">{aiSummary(p.description)}</p>
             )}
           </div>
           <div className="flex gap-2">

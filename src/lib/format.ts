@@ -50,3 +50,15 @@ export const VENDOR_COLORS: Record<string, string> = {
 export function vendorColor(v: string): string {
   return VENDOR_COLORS[v] ?? "bg-muted text-muted-foreground";
 }
+
+/** 只展示 AI 生成的决策版简介；隐藏导入期的模板简介（含「数据来源：」或「收录自」开头） */
+export function aiSummary(desc: string | null | undefined): string | null {
+  if (!desc) return null;
+  if (desc.includes("数据来源：") || desc.startsWith("收录自")) return null;
+  return desc;
+}
+
+/** 过滤不合规/高风险等导入期标记标签，不在前台展示 */
+export function visibleTags(tags: string[] | null | undefined): string[] {
+  return (tags ?? []).filter((t) => !/合规|高风险/.test(t));
+}

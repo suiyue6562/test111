@@ -3,7 +3,7 @@ import { ExternalLink, MessageSquarePlus, Star, Scale } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import UptimeBar from "@/components/UptimeBar";
-import { fmtLatency, timeAgo, vendorColor } from "@/lib/format";
+import { fmtLatency, timeAgo, vendorColor, aiSummary } from "@/lib/format";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -138,9 +138,9 @@ export default function PlatformCard({
         </div>
       </div>
 
-      {/* AI 优势总结：帮助用户快速判断该站是否适合自己 */}
-      {p.description && (
-        <p className="text-xs text-muted-foreground leading-5 line-clamp-2">{p.description}</p>
+      {/* AI 优势总结：帮助用户快速判断该站是否适合自己（模板简介不展示） */}
+      {aiSummary(p.description) && (
+        <p className="text-xs text-muted-foreground leading-5 line-clamp-2">{aiSummary(p.description)}</p>
       )}
 
       <div className="flex items-center gap-1.5 flex-wrap">
