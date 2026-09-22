@@ -50446,7 +50446,60 @@ async function withStats(db, rows) {
   });
 }
 var sortEnum = external_exports.enum(["default", "uptime", "latency", "visits", "newest"]);
+var NEW_SITE_DAYS = 14;
+var NEW_SITE_BOOST = 8;
+var AD_PIN_LIMIT = 3;
+function isAdActive(p) {
+  return p.isAd && (!p.adExpireAt || p.adExpireAt.getTime() > Date.now());
+}
+function ageDays(p) {
+  return (Date.now() - p.createdAt.getTime()) / 864e5;
+}
 var platformRouter = createRouter({
+  /** 首页四层推荐流：广告主 → 优秀站 → 爆款站 → 新站 */
+  homeFeed: publicQuery.query(async () => {
+    const db = getDb();
+    const picked = /* @__PURE__ */ new Set();
+    const take = (rows, n) => {
+      const out = [];
+      for (const r of rows) {
+        if (picked.has(r.id)) continue;
+        picked.add(r.id);
+        out.push(r);
+        if (out.length >= n) break;
+      }
+      return out;
+    };
+    const adRows = await db.select().from(platforms).where(
+      and(
+        eq(platforms.isAd, true),
+        or(sql`${platforms.adExpireAt} IS NULL`, sql`${platforms.adExpireAt} > NOW()`)
+      )
+    ).orderBy(desc(platforms.adWeight), desc(platforms.score)).limit(6);
+    const ads = take(adRows, 3);
+    const excellentRows = await db.select().from(platforms).where(and(eq(platforms.status, "operational"), sql`${platforms.stage} != 'closed'`)).orderBy(desc(platforms.score), desc(platforms.visitCount)).limit(12);
+    const excellent = take(excellentRows, 6);
+    const since7 = new Date(Date.now() - 7 * 864e5);
+    const hotIds = await db.select({ platformId: visitLogs.platformId, c: sql`count(*)` }).from(visitLogs).where(sql`${visitLogs.createdAt} >= ${since7}`).groupBy(visitLogs.platformId).orderBy(desc(sql`count(*)`)).limit(12);
+    let hotRows = [];
+    if (hotIds.length > 0) {
+      const rows = await db.select().from(platforms).where(inArray(platforms.id, hotIds.map((h) => h.platformId)));
+      const order2 = new Map(hotIds.map((h, i) => [h.platformId, i]));
+      hotRows = rows.sort((a, b) => (order2.get(a.id) ?? 99) - (order2.get(b.id) ?? 99));
+    } else {
+      hotRows = await db.select().from(platforms).where(sql`${platforms.stage} != 'closed'`).orderBy(desc(platforms.visitCount)).limit(12);
+    }
+    const hot = take(hotRows, 6);
+    const since30 = new Date(Date.now() - 30 * 864e5);
+    const newRows = await db.select().from(platforms).where(and(sql`${platforms.createdAt} >= ${since30}`, sql`${platforms.stage} != 'closed'`)).orderBy(desc(platforms.createdAt)).limit(12);
+    const newSites = take(newRows, 6);
+    return {
+      ads: await withStats(db, ads),
+      excellent: await withStats(db, excellent),
+      hot: await withStats(db, hot),
+      newSites: await withStats(db, newSites)
+    };
+  }),
   /** 首页精选：按综合评分排序 */
   featured: publicQuery.query(async () => {
     const db = getDb();
@@ -50505,7 +50558,10 @@ var platformRouter = createRouter({
         (r) => input.vendors.some((v) => r.vendors.includes(v))
       );
     }
-    let result = await withStats(db, rows);
+    let result = (await withStats(db, rows)).map((r) => ({
+      ...r,
+      adActive: isAdActive(r)
+    }));
     switch (input.sort) {
       case "uptime":
         result.sort((a, b) => (b.uptime ?? -1) - (a.uptime ?? -1));
@@ -50523,10 +50579,16 @@ var platformRouter = createRouter({
           (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
         );
         break;
-      default:
-        result.sort(
-          (a, b) => Number(b.score) - Number(a.score) || b.visitCount - a.visitCount
-        );
+      default: {
+        const ads = result.filter((r) => r.adActive).sort((a, b) => b.adWeight - a.adWeight || Number(b.score) - Number(a.score)).slice(0, AD_PIN_LIMIT);
+        const adIds = new Set(ads.map((a) => a.id));
+        const rest = result.filter((r) => !adIds.has(r.id)).sort((a, b) => {
+          const sa = Number(a.score) + (ageDays(a) <= NEW_SITE_DAYS ? NEW_SITE_BOOST : 0);
+          const sb = Number(b.score) + (ageDays(b) <= NEW_SITE_DAYS ? NEW_SITE_BOOST : 0);
+          return sb - sa || b.visitCount - a.visitCount;
+        });
+        result = [...ads, ...rest];
+      }
     }
     const total = result.length;
     const start = (input.page - 1) * input.pageSize;

@@ -23,6 +23,7 @@ export interface CardPlatform {
   stage: Stage;
   featured: boolean;
   visitCount: number;
+  adActive?: boolean;
   uptime: number | null;
   avgLatency: number | null;
   daily: { date: string; status: "ok" | "slow" | "down" | "nodata"; latencyMs: number | null }[];
@@ -120,7 +121,12 @@ export default function PlatformCard({
             {v}
           </span>
         ))}
-        <span className={`text-[11px] px-1.5 py-0.5 rounded ml-auto ${st.cls}`}>{st.label}</span>
+        {p.adActive && (
+          <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 ml-auto">
+            广告
+          </span>
+        )}
+        <span className={`text-[11px] px-1.5 py-0.5 rounded ${p.adActive ? "" : "ml-auto"} ${st.cls}`}>{st.label}</span>
       </div>
 
       <div>

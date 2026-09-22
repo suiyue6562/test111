@@ -58,7 +58,105 @@ async function withStats(db: ReturnType<typeof getDb>, rows: typeof platforms.$i
 
 const sortEnum = z.enum(["default", "uptime", "latency", "visits", "newest"]);
 
+/** 新站扶持期（天）：扶持期内默认排序加权 */
+const NEW_SITE_DAYS = 14;
+/** 新站默认排序加成分 */
+const NEW_SITE_BOOST = 8;
+/** 列表页广告置顶数量上限（保护用户体验） */
+const AD_PIN_LIMIT = 3;
+
+function isAdActive(p: { isAd: boolean; adExpireAt: Date | null }) {
+  return p.isAd && (!p.adExpireAt || p.adExpireAt.getTime() > Date.now());
+}
+
+function ageDays(p: { createdAt: Date }) {
+  return (Date.now() - p.createdAt.getTime()) / 86400_000;
+}
+
 export const platformRouter = createRouter({
+  /** 首页四层推荐流：广告主 → 优秀站 → 爆款站 → 新站 */
+  homeFeed: publicQuery.query(async () => {
+    const db = getDb();
+    const picked = new Set<number>();
+    const take = (rows: typeof platforms.$inferSelect[], n: number) => {
+      const out = [];
+      for (const r of rows) {
+        if (picked.has(r.id)) continue;
+        picked.add(r.id);
+        out.push(r);
+        if (out.length >= n) break;
+      }
+      return out;
+    };
+
+    // 1) 广告主：未过期，按权重
+    const adRows = await db
+      .select()
+      .from(platforms)
+      .where(
+        and(
+          eq(platforms.isAd, true),
+          or(sql`${platforms.adExpireAt} IS NULL`, sql`${platforms.adExpireAt} > NOW()`),
+        ),
+      )
+      .orderBy(desc(platforms.adWeight), desc(platforms.score))
+      .limit(6);
+    const ads = take(adRows, 3);
+
+    // 2) 优秀站：正常运营 + 综合评分最高
+    const excellentRows = await db
+      .select()
+      .from(platforms)
+      .where(and(eq(platforms.status, "operational"), sql`${platforms.stage} != 'closed'`))
+      .orderBy(desc(platforms.score), desc(platforms.visitCount))
+      .limit(12);
+    const excellent = take(excellentRows, 6);
+
+    // 3) 爆款站：近 7 天真实访问量最高（无访问数据时回退到历史总访问量）
+    const since7 = new Date(Date.now() - 7 * 86400_000);
+    const hotIds = await db
+      .select({ platformId: visitLogs.platformId, c: sql<number>`count(*)` })
+      .from(visitLogs)
+      .where(sql`${visitLogs.createdAt} >= ${since7}`)
+      .groupBy(visitLogs.platformId)
+      .orderBy(desc(sql`count(*)`))
+      .limit(12);
+    let hotRows: typeof platforms.$inferSelect[] = [];
+    if (hotIds.length > 0) {
+      const rows = await db
+        .select()
+        .from(platforms)
+        .where(inArray(platforms.id, hotIds.map((h) => h.platformId)));
+      const order = new Map(hotIds.map((h, i) => [h.platformId, i]));
+      hotRows = rows.sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99));
+    } else {
+      hotRows = await db
+        .select()
+        .from(platforms)
+        .where(sql`${platforms.stage} != 'closed'`)
+        .orderBy(desc(platforms.visitCount))
+        .limit(12);
+    }
+    const hot = take(hotRows, 6);
+
+    // 4) 新站速递：30 天内收录，最新在前
+    const since30 = new Date(Date.now() - 30 * 86400_000);
+    const newRows = await db
+      .select()
+      .from(platforms)
+      .where(and(sql`${platforms.createdAt} >= ${since30}`, sql`${platforms.stage} != 'closed'`))
+      .orderBy(desc(platforms.createdAt))
+      .limit(12);
+    const newSites = take(newRows, 6);
+
+    return {
+      ads: await withStats(db, ads),
+      excellent: await withStats(db, excellent),
+      hot: await withStats(db, hot),
+      newSites: await withStats(db, newSites),
+    };
+  }),
+
   /** 首页精选：按综合评分排序 */
   featured: publicQuery.query(async () => {
     const db = getDb();
@@ -134,7 +232,10 @@ export const platformRouter = createRouter({
           input.vendors!.some((v) => (r.vendors as string[]).includes(v)),
         );
       }
-      let result = await withStats(db, rows);
+      let result = (await withStats(db, rows)).map((r) => ({
+        ...r,
+        adActive: isAdActive(r),
+      }));
       switch (input.sort) {
         case "uptime":
           result.sort((a, b) => (b.uptime ?? -1) - (a.uptime ?? -1));
@@ -152,10 +253,23 @@ export const platformRouter = createRouter({
             (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
           );
           break;
-        default:
-          result.sort(
-            (a, b) => Number(b.score) - Number(a.score) || b.visitCount - a.visitCount,
-          );
+        default: {
+          // 混合推荐：未过期广告按权重置顶（限 3 个，保护体验）；
+          // 其余按综合评分排序，扶持期内新站加分获得冷启动曝光
+          const ads = result
+            .filter((r) => r.adActive)
+            .sort((a, b) => b.adWeight - a.adWeight || Number(b.score) - Number(a.score))
+            .slice(0, AD_PIN_LIMIT);
+          const adIds = new Set(ads.map((a) => a.id));
+          const rest = result
+            .filter((r) => !adIds.has(r.id))
+            .sort((a, b) => {
+              const sa = Number(a.score) + (ageDays(a) <= NEW_SITE_DAYS ? NEW_SITE_BOOST : 0);
+              const sb = Number(b.score) + (ageDays(b) <= NEW_SITE_DAYS ? NEW_SITE_BOOST : 0);
+              return sb - sa || b.visitCount - a.visitCount;
+            });
+          result = [...ads, ...rest];
+        }
       }
       const total = result.length;
       const start = (input.page - 1) * input.pageSize;
