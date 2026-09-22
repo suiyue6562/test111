@@ -13,32 +13,39 @@ const AI_TIMEOUT = 60000;
 
 async function chat(system, user, maxTokens = 4000) {
   if (!AI_KEY) throw new Error("AI_API_KEY 未配置");
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), AI_TIMEOUT);
-  try {
-    const res = await fetch(`${AI_BASE}/chat/completions`, {
-      method: "POST",
-      signal: ctrl.signal,
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${AI_KEY}` },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        max_tokens: maxTokens,
-        temperature: 0.2,
-      }),
-    });
-    if (!res.ok) throw new Error(`AI HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const j = await res.json();
-    let content = j?.choices?.[0]?.message?.content ?? "";
-    // M3 为推理模型，剥离 <think> 段
-    content = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-    return content;
-  } finally {
-    clearTimeout(t);
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 3000));
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), AI_TIMEOUT);
+    try {
+      const res = await fetch(`${AI_BASE}/chat/completions`, {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${AI_KEY}` },
+        body: JSON.stringify({
+          model: AI_MODEL,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+          max_tokens: maxTokens,
+          temperature: 0.2,
+        }),
+      });
+      if (!res.ok) throw new Error(`AI HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      const j = await res.json();
+      let content = j?.choices?.[0]?.message?.content ?? "";
+      // M3 为推理模型，剥离 <think> 段
+      content = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+      return content;
+    } catch (e) {
+      lastErr = e;
+    } finally {
+      clearTimeout(t);
+    }
   }
+  throw lastErr;
 }
 
 /** 从 AI 输出中提取 JSON 数组（容忍 markdown 代码块） */
@@ -189,18 +196,23 @@ async function runAiTasks(pool) {
   const runId = runRes.insertId;
   const details = [];
   let ok = true;
-  try {
-    const review = await reviewPriceMutations(pool);
-    details.push(`复核:${review.skipped ? "无待复核" : `${review.reviewed}条(自动确认${review.autoOk}/存疑${review.suspect})`}`);
-    const summ = await summarizePlatforms(pool);
-    details.push(`简介:${summ.done}/${summ.total}生成`);
-    const health = await aiHealthCheck(pool);
-    details.push(`巡检:总${health.total} 负值${health.negative ?? 0} 极端${health.extreme ?? 0} 超48h${health.stale48h ?? 0} 待复核余${health.pendingReview ?? 0}`);
-  } catch (e) {
-    ok = false;
-    details.push(`错误:${String(e.message).slice(0, 120)}`);
-    console.error("[ai] 任务失败:", e.message);
-  }
+  // 每个子任务独立容错：一个失败不影响其他（MiniMax 偶发超时/中止）
+  const safe = async (label, fn, fallback) => {
+    try {
+      return await fn();
+    } catch (e) {
+      ok = false;
+      details.push(`${label}失败:${String(e.message).slice(0, 60)}`);
+      console.error(`[ai] ${label}失败:`, e.message);
+      return fallback;
+    }
+  };
+  const review = await safe("复核", () => reviewPriceMutations(pool), null);
+  if (review) details.push(`复核:${review.skipped ? "无待复核" : `${review.reviewed}条(自动确认${review.autoOk}/存疑${review.suspect})`}`);
+  const summ = await safe("简介", () => summarizePlatforms(pool), null);
+  if (summ) details.push(`简介:${summ.done}/${summ.total}生成`);
+  const health = await safe("巡检", () => aiHealthCheck(pool), null);
+  if (health) details.push(`巡检:总${health.total} 负值${health.negative ?? 0} 极端${health.extreme ?? 0} 超48h${health.stale48h ?? 0} 待复核余${health.pendingReview ?? 0}`);
   await pool.query(
     "UPDATE collector_runs SET finishedAt = NOW(), okCount = ?, failCount = ?, detail = ? WHERE id = ?",
     [ok ? 1 : 0, ok ? 0 : 1, details.join(" | ").slice(0, 480), runId],
