@@ -3,7 +3,7 @@ import { ExternalLink, MessageSquarePlus, Star, Scale } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import UptimeBar from "@/components/UptimeBar";
-import { fmtLatency, timeAgo, vendorColor, aiSummary, fmtRatio } from "@/lib/format";
+import { fmtLatency, timeAgo, vendorColor, fmtRatio } from "@/lib/format";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -17,6 +17,8 @@ export interface CardPlatform {
   domain: string;
   url: string;
   description: string | null;
+  /** AI 提炼的优势标签 */
+  aiTags?: string[] | null;
   vendors: string[];
   tags: string[];
   status: Status;
@@ -142,9 +144,18 @@ export default function PlatformCard({
         </div>
       </div>
 
-      {/* AI 优势总结：帮助用户快速判断该站是否适合自己（模板简介不展示） */}
-      {aiSummary(p.description) && (
-        <p className="text-xs text-muted-foreground leading-5 line-clamp-2">{aiSummary(p.description)}</p>
+      {/* AI 优势标签：短词徽章，扫一眼就知道站点亮点 */}
+      {p.aiTags && p.aiTags.length > 0 && (
+        <div className="flex items-center gap-1 flex-wrap">
+          {p.aiTags.map((t) => (
+            <span
+              key={t}
+              className="text-[11px] px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-600 dark:text-teal-400 font-medium"
+            >
+              {t}
+            </span>
+          ))}
+        </div>
       )}
 
       {/* 热门模型报价：用户决策的核心依据 */}

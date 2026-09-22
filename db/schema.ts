@@ -45,6 +45,7 @@ export const platforms = mysqlTable(
     url: varchar("url", { length: 512 }).notNull(),
     apiBaseUrl: varchar("apiBaseUrl", { length: 512 }),
     description: text("description"),
+    aiTags: json("aiTags").$type<string[]>(), // AI 提炼的优势标签（3-5 个短标签）
     vendors: json("vendors").$type<string[]>().notNull(), // ["OpenAI","Claude",...]
     tags: json("tags").$type<string[]>().notNull(),
     status: mysqlEnum("status", ["operational", "slow", "down", "unknown"])

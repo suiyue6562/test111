@@ -48,6 +48,13 @@ function parseJsonArray(text) {
   try { return JSON.parse(m[0]); } catch { return null; }
 }
 
+/** 从 AI 输出中提取 JSON 对象（容忍 markdown 代码块） */
+function parseJsonObject(text) {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try { return JSON.parse(m[0]); } catch { return null; }
+}
+
 /** 价格突变 AI 复核：自动确认合理调价，可疑的保留人工复核 */
 async function reviewPriceMutations(pool) {
   const [rows] = await pool.query(
@@ -105,17 +112,19 @@ async function fetchHomepageText(url) {
   }
 }
 
-/** 为缺简介或简介过时的站点生成「优势+适合人群」决策摘要（每轮最多 limit 个） */
+/** 为站点生成「优势标签 + 决策摘要」（每轮最多 limit 个）
+ *  标签：3-5 个 2-6 字短标签，展示在卡片上（如 低价优选/模型覆盖广/按次计费/企业合规）
+ *  摘要：详情页使用的「优势+适合人群」段落 */
 async function summarizePlatforms(pool, limit = 150) {
   const [plats] = await pool.query(
-    `SELECT p.id, p.name, p.url, p.description,
+    `SELECT p.id, p.name, p.url, p.description, p.aiTags,
        (SELECT COUNT(DISTINCT model) FROM platform_prices WHERE platformId = p.id) AS models,
        (SELECT MIN(ratio) FROM platform_prices WHERE platformId = p.id AND ratio > 0) AS minRatio,
-       (SELECT COUNT(DISTINCT groupName) FROM platform_prices WHERE platformId = p.id) AS groups,
+       (SELECT COUNT(DISTINCT groupName) FROM platform_prices WHERE platformId = p.id) AS \`groups\`,
        (SELECT COUNT(DISTINCT vendor) FROM platform_prices WHERE platformId = p.id) AS vendors
      FROM platforms p
      WHERE p.status IN ('operational','slow')
-       AND (p.description IS NULL OR CHAR_LENGTH(p.description) < 10
+       AND (p.aiTags IS NULL OR p.description IS NULL OR CHAR_LENGTH(p.description) < 10
             OR p.description LIKE '收录自%' OR p.description LIKE '%暂未%' OR p.description LIKE '%有待补充%'
             OR p.description LIKE '%数据来源：%')
      ORDER BY p.visitCount DESC, p.id ASC
@@ -128,21 +137,25 @@ async function summarizePlatforms(pool, limit = 150) {
     if (!homepage) { failed++; continue; }
     const facts = `站点名：${p.name}\n覆盖供应商数：${p.vendors}\n已采到模型数：${p.models}\n最低计费倍率：${p.minRatio ?? "无数据"}\n价格组数：${p.groups}\n官网首页文本：${homepage}`;
     try {
-      const summary = await chat(
-        "你是 API 中转站导航站的编辑，帮用户快速判断一个站点是否适合自己。",
-        `${facts}\n\n用中文写该站的优势总结，80 字以内，格式为「优势一句话。适合：某类用户/场景」。\n` +
-          `优势只写可从数据或官网确认的事实（如模型覆盖广、倍率低、支持按次计费、有某类专属分组、延迟低等），` +
-          `适合人群从「价格敏感型、稳定性优先、需要特定模型、企业级需求」等角度判断。\n` +
-          `不用广告词，不用"最/第一"，数据不足时如实说明。直接输出简介文本。`,
-        800,
+      const out = await chat(
+        "你是 API 中转站导航站的编辑，输出必须是 JSON 对象，不要输出其他内容。",
+        `${facts}\n\n基于以上事实，输出 JSON：{"tags":["..."],"summary":"..."}\n` +
+          `tags：3-5 个优势标签，每个 2-6 个汉字，从这类角度提炼：低价优选、模型覆盖广、多供应商、按次计费、分组灵活、企业合规、海外直连、新站福利、高可用、免费额度等；` +
+          `只写数据或官网能证实的优势，数据不足就少于 3 个，不要编造，不用"最/第一"。\n` +
+          `summary：80 字以内中文，格式「优势一句话。适合：某类用户/场景」，同样只写可证实的事实，数据不足如实说明。`,
+        1200,
       );
-      const text = summary.replace(/\s+/g, " ").trim().slice(0, 200);
-      if (text.length >= 10) {
-        await pool.query("UPDATE platforms SET description = ? WHERE id = ?", [text, p.id]);
-        done++;
-      } else {
-        failed++;
-      }
+      const parsed = parseJsonObject(out);
+      const tags = Array.isArray(parsed?.tags)
+        ? parsed.tags.map((t) => String(t).trim()).filter((t) => t.length >= 2 && t.length <= 8).slice(0, 5)
+        : [];
+      const summary = String(parsed?.summary ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+      if (tags.length === 0 && summary.length < 10) { failed++; continue; }
+      await pool.query(
+        "UPDATE platforms SET description = ?, aiTags = ? WHERE id = ?",
+        [summary.length >= 10 ? summary : p.description, JSON.stringify(tags), p.id],
+      );
+      done++;
     } catch (e) {
       failed++;
       console.log(`[ai] 简介生成失败 ${p.name}: ${String(e.message).slice(0, 80)}`);

@@ -48065,6 +48065,8 @@ var platforms = mysqlTable(
     url: varchar("url", { length: 512 }).notNull(),
     apiBaseUrl: varchar("apiBaseUrl", { length: 512 }),
     description: text("description"),
+    aiTags: json2("aiTags").$type(),
+    // AI 提炼的优势标签（3-5 个短标签）
     vendors: json2("vendors").$type().notNull(),
     // ["OpenAI","Claude",...]
     tags: json2("tags").$type().notNull(),

@@ -423,6 +423,26 @@ async function fetchPlatformPrices(platform) {
     }
     if (items.length > 0) return items;
   }
+
+  // 3) OpenRouter 风格：/api/v1/models 返回 data[].pricing（美元/token 绝对价）
+  //    换算进倍率体系：倍率 1 对应 $0.002/1K 输入（one-api 约定），即 ratio = prompt单价 × 500000
+  const oj = await fetchJson(`${root}/api/v1/models`);
+  if (oj && Array.isArray(oj.data) && oj.data.length > 0) {
+    const items = [];
+    for (const m of oj.data) {
+      const model = m.id || m.model || m.name;
+      const pp = Number(m.pricing?.prompt);
+      const pc = Number(m.pricing?.completion);
+      if (!model || !(pp > 0)) continue;
+      const ratio = pp * 500000;
+      if (!(ratio > 0 && ratio < 10000)) continue;
+      const cr = pc > 0 ? pc / pp : 3;
+      const costs = estimateCosts(ratio, cr, 1);
+      items.push({ vendor: vendorOf(model), model, groupName: "default", ratio: ratio.toFixed(4), ...costs, source: "openrouter_api" });
+      if (items.length >= MAX_ITEMS) break;
+    }
+    if (items.length > 0) return items;
+  }
   return null;
 }
 
