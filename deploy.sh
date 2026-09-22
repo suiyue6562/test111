@@ -21,7 +21,16 @@ else
   echo "skip npm ci (lockfile unchanged)"
 fi
 
-npm run build
+# 构建：1G 内存机器上先停应用腾内存、限制构建堆内存；失败则回滚 dist
+cp -r dist dist.bak 2>/dev/null || true
+pm2 stop sk-buy || true
+if ! NODE_OPTIONS=--max-old-space-size=640 npm run build; then
+  echo "[warn] build failed, restoring previous dist"
+  rm -rf dist && mv dist.bak dist
+  pm2 restart sk-buy
+  exit 1
+fi
+rm -rf dist.bak
 
 # 幂等结构迁移（新增字段等）
 node scripts/apply-features.cjs
