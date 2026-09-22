@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,11 +51,9 @@ export default function Login({ defaultTab = "login" }: { defaultTab?: "login" |
     <div className="min-h-[70vh] flex items-center justify-center">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <div className="mx-auto w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center mb-2">
-            <Sparkles className="w-5 h-5 text-white" />
-          </div>
-          <CardTitle>API 优选</CardTitle>
-          <CardDescription>登录后可收藏、点评、领码与发帖</CardDescription>
+          <img src="/logo.png" alt="apibuy.top" className="mx-auto w-10 h-10 mb-2" />
+          <CardTitle>api<span className="text-orange-500">buy</span></CardTitle>
+          <CardDescription>帮你选对 API 中转站 · 登录后可收藏、点评、领码与发帖</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Tabs defaultValue={defaultTab}>

@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import { ArrowRight, Sparkles, Megaphone, Trophy, Flame, Rocket, Tags } from "lucide-react";
+import { ArrowRight, Megaphone, Trophy, Flame, Rocket, Tags } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -44,22 +44,29 @@ export default function Home() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border bg-card p-5 flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-lg font-bold flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-indigo-500" />
-            首页推荐
+      {/* 品牌区：主广告语 + 中版说明 */}
+      <div className="rounded-xl border bg-gradient-to-br from-orange-500/[0.06] via-card to-card p-6 flex items-center justify-between gap-6 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-[11px] font-medium tracking-widest text-orange-500 mb-1.5">API 选品推荐</div>
+          <h1 className="text-2xl font-bold leading-snug">
+            选 API 中转站，上 <span className="text-orange-500">apibuy.top</span>
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            赞助优选 · 口碑优秀站 · 人气爆款 · 新站速递，完整筛选请前往综合筛选页。
+          <p className="text-sm text-muted-foreground mt-2 max-w-xl">
+            不知道哪家中转站合适？我们帮你筛过、比过、推荐过，选对不选错。
           </p>
         </div>
         <Button
-          className="rounded-full bg-indigo-600 hover:bg-indigo-700"
+          className="rounded-full bg-orange-500 hover:bg-orange-600 text-white shrink-0"
           onClick={() => navigate("/discover")}
         >
           进入综合筛选 <ArrowRight className="w-4 h-4 ml-1" />
         </Button>
+      </div>
+
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <p className="text-xs text-muted-foreground">
+          首页推荐：赞助优选 · 口碑优秀站 · 人气爆款 · 新站速递，完整筛选请前往综合筛选页。
+        </p>
       </div>
 
       {isLoading ? (

@@ -18,7 +18,6 @@ import {
   Shield,
   LogOut,
   ChevronDown,
-  Sparkles,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/hooks/useAuth";
@@ -74,13 +73,13 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
         }`}
       >
         <Link to="/" className="flex items-center gap-2 px-4 h-16 border-b">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shrink-0">
-            <Sparkles className="w-4 h-4 text-white" />
-          </div>
+          <img src="/logo.png" alt="apibuy.top" className="w-8 h-8 shrink-0" />
           {!sidebarCollapsed && (
             <div className="leading-tight">
-              <div className="font-bold text-sm">API 优选</div>
-              <div className="text-[10px] text-muted-foreground">apixuan workspace</div>
+              <div className="font-bold text-sm">
+                api<span className="text-orange-500">buy</span>
+              </div>
+              <div className="text-[10px] text-muted-foreground">帮你选对 API 中转站</div>
             </div>
           )}
         </Link>
@@ -258,7 +257,8 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
             <Link to="/terms" className="hover:text-foreground">用户协议</Link>
             <Link to="/disclaimer" className="hover:text-foreground">风险声明</Link>
           </div>
-          © 2026 API 优选 · 数据仅供演示参考
+          <div className="mb-1 text-foreground/80">我们不替你买，只帮你选对。</div>
+          © 2026 apibuy.top · 选之前先看推荐
         </footer>
       </div>
 
