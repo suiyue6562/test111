@@ -106,8 +106,7 @@ export default function PlatformCard({
             {p.name}
           </button>
           <div className="text-xs text-muted-foreground truncate">{p.domain}</div>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
+        </div>        <div className="flex items-center gap-1.5 shrink-0">
           {compareMode && (
             <Button
               size="icon"
@@ -138,6 +137,11 @@ export default function PlatformCard({
           </Badge>
         </div>
       </div>
+
+      {/* AI 优势总结：帮助用户快速判断该站是否适合自己 */}
+      {p.description && (
+        <p className="text-xs text-muted-foreground leading-5 line-clamp-2">{p.description}</p>
+      )}
 
       <div className="flex items-center gap-1.5 flex-wrap">
         {p.vendors.map((v) => (

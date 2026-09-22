@@ -105,16 +105,18 @@ async function fetchHomepageText(url) {
   }
 }
 
-/** 为缺简介的站点生成特点/优点摘要（每轮最多 limit 个） */
+/** 为缺简介或简介过时的站点生成「优势+适合人群」决策摘要（每轮最多 limit 个） */
 async function summarizePlatforms(pool, limit = 40) {
   const [plats] = await pool.query(
     `SELECT p.id, p.name, p.url, p.description,
        (SELECT COUNT(DISTINCT model) FROM platform_prices WHERE platformId = p.id) AS models,
        (SELECT MIN(ratio) FROM platform_prices WHERE platformId = p.id AND ratio > 0) AS minRatio,
-       (SELECT COUNT(DISTINCT groupName) FROM platform_prices WHERE platformId = p.id) AS groups
+       (SELECT COUNT(DISTINCT groupName) FROM platform_prices WHERE platformId = p.id) AS groups,
+       (SELECT COUNT(DISTINCT vendor) FROM platform_prices WHERE platformId = p.id) AS vendors
      FROM platforms p
      WHERE p.status IN ('operational','slow')
-       AND (p.description IS NULL OR CHAR_LENGTH(p.description) < 10 OR p.description LIKE '收录自%')
+       AND (p.description IS NULL OR CHAR_LENGTH(p.description) < 10
+            OR p.description LIKE '收录自%' OR p.description LIKE '%暂未%' OR p.description LIKE '%有待补充%')
      ORDER BY p.visitCount DESC, p.id ASC
      LIMIT ?`,
     [limit],
@@ -123,11 +125,14 @@ async function summarizePlatforms(pool, limit = 40) {
   for (const p of plats) {
     const homepage = await fetchHomepageText(p.url);
     if (!homepage) { failed++; continue; }
-    const facts = `站点名：${p.name}\n已采到模型数：${p.models}\n最低倍率：${p.minRatio ?? "无"}\n价格组数：${p.groups}\n官网首页文本：${homepage}`;
+    const facts = `站点名：${p.name}\n覆盖供应商数：${p.vendors}\n已采到模型数：${p.models}\n最低计费倍率：${p.minRatio ?? "无数据"}\n价格组数：${p.groups}\n官网首页文本：${homepage}`;
     try {
       const summary = await chat(
-        "你是 API 中转站导航站的编辑，为站点写一句客观简介。",
-        `${facts}\n\n要求：中文，80 字以内，说明该站覆盖模型、价格水平、特色（如分组/按次计费/逆向等），只写事实，不用广告词和"最/第一"，不夸大。直接输出简介文本。`,
+        "你是 API 中转站导航站的编辑，帮用户快速判断一个站点是否适合自己。",
+        `${facts}\n\n用中文写该站的优势总结，80 字以内，格式为「优势一句话。适合：某类用户/场景」。\n` +
+          `优势只写可从数据或官网确认的事实（如模型覆盖广、倍率低、支持按次计费、有某类专属分组、延迟低等），` +
+          `适合人群从「价格敏感型、稳定性优先、需要特定模型、企业级需求」等角度判断。\n` +
+          `不用广告词，不用"最/第一"，数据不足时如实说明。直接输出简介文本。`,
         800,
       );
       const text = summary.replace(/\s+/g, " ").trim().slice(0, 200);
