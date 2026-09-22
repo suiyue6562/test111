@@ -60,15 +60,15 @@ async function withStats(db: ReturnType<typeof getDb>, rows: typeof platforms.$i
   const priceRows = ids.length
     ? await db.execute(sql`
         SELECT platformId,
-          MIN(CASE WHEN LOWER(model) LIKE 'gpt-5%' THEN ratio END) AS gpt5,
-          MIN(CASE WHEN LOWER(model) LIKE 'gpt-4o%' THEN ratio END) AS gpt4o,
-          MIN(CASE WHEN LOWER(model) LIKE '%sonnet%' THEN ratio END) AS claude,
-          MIN(CASE WHEN LOWER(model) LIKE 'gemini%pro%' THEN ratio END) AS gemini,
-          MIN(CASE WHEN LOWER(model) LIKE 'deepseek%' THEN ratio END) AS deepseek,
-          MIN(CASE WHEN LOWER(model) LIKE 'kimi%' THEN ratio END) AS kimi,
-          MIN(CASE WHEN LOWER(model) LIKE 'glm%' THEN ratio END) AS glm,
-          MIN(CASE WHEN LOWER(model) LIKE 'qwen%' THEN ratio END) AS qwen,
-          MIN(ratio) AS minRatio
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE 'gpt-5%' THEN ratio END) AS gpt5,
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE 'gpt-4o%' THEN ratio END) AS gpt4o,
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE '%sonnet%' THEN ratio END) AS claude,
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE 'gemini%pro%' THEN ratio END) AS gemini,
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE 'deepseek%' THEN ratio END) AS deepseek,
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE 'kimi%' THEN ratio END) AS kimi,
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE 'glm%' THEN ratio END) AS glm,
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE 'qwen%' THEN ratio END) AS qwen,
+          MIN(CASE WHEN ratio > 0 THEN ratio END) AS minRatio
         FROM platform_prices
         WHERE platformId IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)}) AND needReview = 0
         GROUP BY platformId
