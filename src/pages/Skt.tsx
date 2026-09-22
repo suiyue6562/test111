@@ -25,6 +25,7 @@ export default function Skt() {
 
   const test = trpc.skt.test.useMutation({
     onSuccess: (r) => setResult(r),
+    onError: (e) => setResult({ ok: false, latencyMs: 0, message: e.message }),
   });
 
   return (
