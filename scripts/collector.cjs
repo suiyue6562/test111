@@ -69,6 +69,30 @@ async function probe(platform) {
 
 const WORST = { ok: 0, slow: 1, down: 2, nodata: -1 };
 
+/**
+ * 探测站点首页可达性：拿到任何 HTTP 响应（含 403/404/跳转）都算"打得开"，
+ * 只有网络级失败/超时才算打不开。用户点推荐卡片跳的是首页，
+ * 首页打不开 = 不可用，即使 API /models 还活着也不能上推荐。
+ */
+async function probeWeb(url) {
+  const root = (url || "").replace(/\/+$/, "");
+  if (!root) return { webAlive: true, webStatus: null }; // 无首页地址时不误伤
+  const started = Date.now();
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    const res = await fetch(root, {
+      signal: ctrl.signal,
+      redirect: "follow",
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; SKBuyBot/1.0)" },
+    });
+    clearTimeout(timer);
+    return { webAlive: res.status > 0 && res.status < 600, webStatus: res.status, webLatencyMs: Date.now() - started };
+  } catch {
+    return { webAlive: false, webStatus: 0, webLatencyMs: Date.now() - started };
+  }
+}
+
 async function runOnce(pool) {
   const [plats] = await pool.query(
     "SELECT id, name, apiBaseUrl, url, status FROM platforms WHERE stage != 'closed' OR autoClosed = 1",
@@ -183,10 +207,14 @@ async function autoStageManage(pool) {
 async function probeOne(pool, p, date) {
   try {
     const r = await probe(p);
+    const web = await probeWeb(p.url);
     // 全部候选路径 404：站点在线但 API 中转能力未确认，记为 unknown
     const apiAlive = r.reachable && r.status !== 404;
+    // 用户可用 = API 活着 且 首页打得开；首页打不开直接判 down（不上推荐、计不可用）
+    const usable = apiAlive && web.webAlive;
     let dayStatus;
     if (!apiAlive) dayStatus = r.status === 404 ? "nodata" : "down";
+    else if (!web.webAlive) dayStatus = "down";
     else if (r.latencyMs != null && r.latencyMs > 3000) dayStatus = "slow";
     else dayStatus = "ok";
 
@@ -216,9 +244,9 @@ async function probeOne(pool, p, date) {
       );
     }
 
-    // 平台总状态跟随最新探测（全部路径 404 → unknown，不纳入可用率统计）
+    // 平台总状态跟随最新探测（全部路径 404 → unknown；API 不通或首页打不开 → down）
     const newStatus =
-      dayStatus === "nodata" ? "unknown" : !apiAlive ? "down" : r.latencyMs > 3000 ? "slow" : "operational";
+      dayStatus === "nodata" ? "unknown" : !usable ? "down" : r.latencyMs > 3000 ? "slow" : "operational";
     if (newStatus !== p.status) {
       await pool.query("UPDATE platforms SET status = ? WHERE id = ?", [newStatus, p.id]);
     }
@@ -243,7 +271,7 @@ async function probeOne(pool, p, date) {
       [r.latencyMs, r.apiConfirmed ? 1 : 0, p.id],
     );
     console.log(
-      `[collector] ${p.name}: ${apiAlive ? "可达" : r.status === 404 ? "API未确认" : "不可达"} ${r.latencyMs ?? "-"}ms${r.apiConfirmed ? " [API已确认]" : ""}`,
+      `[collector] ${p.name}: ${usable ? "可达" : !web.webAlive && apiAlive ? "首页打不开" : r.status === 404 ? "API未确认" : "不可达"} ${r.latencyMs ?? "-"}ms${!web.webAlive ? ` [web:${web.webStatus}]` : ""}${r.apiConfirmed ? " [API已确认]" : ""}`,
     );
     return { status: dayStatus, latencyMs: r.latencyMs };
   } catch (e) {
@@ -606,3 +634,4 @@ main().catch((e) => {
   console.error("[collector] fatal:", e);
   process.exit(1);
 });
+

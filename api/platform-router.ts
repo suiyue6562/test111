@@ -187,7 +187,7 @@ export const platformRouter = createRouter({
       return out;
     };
 
-    // 1) 广告主：未过期，按权重（故障站不展示广告——保护用户也保护广告主预算）
+    // 1) 广告主：未过期，按权重（故障/未确认站不展示广告——保护用户也保护广告主预算）
     const adRows = await db
       .select()
       .from(platforms)
@@ -195,6 +195,7 @@ export const platformRouter = createRouter({
         and(
           eq(platforms.isAd, true),
           sql`${platforms.status} != 'down'`,
+          sql`${platforms.status} != 'unknown'`,
           or(sql`${platforms.adExpireAt} IS NULL`, sql`${platforms.adExpireAt} > NOW()`),
         ),
       )
@@ -212,7 +213,7 @@ export const platformRouter = createRouter({
     const excellent = take(excellentRows, 6);
 
     // 3) 爆款站：近 7 天真实访问量最高（无访问数据时回退到历史总访问量）
-    // 当前故障的站不推荐——用户点了打不开是最差体验
+    // 当前故障/未确认的站不推荐——用户点了打不开是最差体验
     const since7 = new Date(Date.now() - 7 * 86400_000);
     const hotIds = await db
       .select({ platformId: visitLogs.platformId, c: sql<number>`count(*)` })
@@ -230,6 +231,7 @@ export const platformRouter = createRouter({
           and(
             inArray(platforms.id, hotIds.map((h) => h.platformId)),
             sql`${platforms.status} != 'down'`,
+            sql`${platforms.status} != 'unknown'`,
             sql`${platforms.stage} != 'closed'`,
           ),
         );
@@ -239,13 +241,13 @@ export const platformRouter = createRouter({
       hotRows = await db
         .select()
         .from(platforms)
-        .where(sql`${platforms.stage} != 'closed' AND ${platforms.status} != 'down'`)
+        .where(sql`${platforms.stage} != 'closed' AND ${platforms.status} != 'down' AND ${platforms.status} != 'unknown'`)
         .orderBy(desc(platforms.visitCount))
         .limit(12);
     }
     const hot = take(hotRows, 6);
 
-    // 4) 新站速递：30 天内收录，最新在前（故障站不推荐）
+    // 4) 新站速递：30 天内收录，最新在前（故障/未确认站不推荐）
     const since30 = new Date(Date.now() - 30 * 86400_000);
     const newRows = await db
       .select()
@@ -255,6 +257,7 @@ export const platformRouter = createRouter({
           sql`${platforms.createdAt} >= ${since30}`,
           sql`${platforms.stage} != 'closed'`,
           sql`${platforms.status} != 'down'`,
+          sql`${platforms.status} != 'unknown'`,
         ),
       )
       .orderBy(desc(platforms.createdAt))
@@ -274,19 +277,27 @@ export const platformRouter = createRouter({
     };
   }),
 
-  /** 首页精选：按综合评分排序 */
+  /** 首页精选：按综合评分排序（仅正常运营且近7天可用率≥50%的站，故障/未确认/关闭一律不上精选） */
   featured: publicQuery.query(async () => {
     const db = getDb();
     const rows = await db
       .select()
       .from(platforms)
-      .where(eq(platforms.featured, true))
+      .where(
+        and(
+          eq(platforms.featured, true),
+          eq(platforms.status, "operational"),
+          sql`${platforms.stage} != 'closed'`,
+        ),
+      )
       .orderBy(desc(platforms.score), desc(platforms.visitCount))
       .limit(18);
-    return withStats(db, rows);
+    const healthy = <T extends { uptime7: number | null }>(arr: T[]) =>
+      arr.filter((r) => r.uptime7 === null || r.uptime7 >= 50);
+    return healthy(await withStats(db, rows));
   }),
 
-  /** 首页赞助广告位：未过期的广告按权重排序 */
+  /** 首页赞助广告位：未过期广告按权重排序（故障站不展示——保护用户也保护广告主预算） */
   adSlots: publicQuery.query(async () => {
     const db = getDb();
     const rows = await db
@@ -295,6 +306,8 @@ export const platformRouter = createRouter({
       .where(
         and(
           eq(platforms.isAd, true),
+          sql`${platforms.status} != 'down'`,
+          sql`${platforms.stage} != 'closed'`,
           or(
             sql`${platforms.adExpireAt} IS NULL`,
             sql`${platforms.adExpireAt} > NOW()`,
@@ -385,13 +398,15 @@ export const platformRouter = createRouter({
           const adjScore = (r: (typeof result)[number]) =>
             Number(r.score) + (ageDays(r) <= NEW_SITE_DAYS ? NEW_SITE_BOOST : 0);
           const rest = result.filter((r) => !adIds.has(r.id));
+          // 仅 operational/slow 算"活站"；unknown（API未确认）与 down 一律沉底，
+          // 避免打不开或根本不是中转站的站点混在榜单前部
           const alive = rest
-            .filter((r) => r.status !== "down")
+            .filter((r) => r.status === "operational" || r.status === "slow")
             .sort((a, b) => adjScore(b) - adjScore(a) || b.visitCount - a.visitCount);
-          const down = rest
-            .filter((r) => r.status === "down")
+          const sunk = rest
+            .filter((r) => r.status !== "operational" && r.status !== "slow")
             .sort((a, b) => adjScore(b) - adjScore(a));
-          result = [...ads, ...alive, ...down];
+          result = [...ads, ...alive, ...sunk];
         }
       }
       const total = result.length;
@@ -665,3 +680,4 @@ export const platformRouter = createRouter({
     return withStats(db, rows);
   }),
 });
+
