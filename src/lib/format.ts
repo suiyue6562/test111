@@ -62,3 +62,11 @@ export function aiSummary(desc: string | null | undefined): string | null {
 export function visibleTags(tags: string[] | null | undefined): string[] {
   return (tags ?? []).filter((t) => !/合规|高风险/.test(t));
 }
+
+/** 倍率显示：去掉多余的 0（0.5000 → 0.5，2 → 2） */
+export function fmtRatio(r: number | string | null | undefined): string {
+  if (r == null) return "—";
+  const n = Number(r);
+  if (!Number.isFinite(n)) return "—";
+  return String(parseFloat(n.toFixed(4)));
+}

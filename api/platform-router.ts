@@ -56,6 +56,39 @@ async function withStats(db: ReturnType<typeof getDb>, rows: typeof platforms.$i
     .where(inArray(platformPrices.platformId, ids))
     .groupBy(platformPrices.platformId);
   const modelCount = new Map(modelRows.map((r) => [r.platformId, Number(r.n)]));
+  // 热门模型报价摘要：每族取该站最低倍率 + 全站最低倍率（一条聚合 SQL，避免逐站查询）
+  const priceRows = ids.length
+    ? await db.execute(sql`
+        SELECT platformId,
+          MIN(CASE WHEN LOWER(model) LIKE 'gpt-5%' THEN ratio END) AS gpt5,
+          MIN(CASE WHEN LOWER(model) LIKE 'gpt-4o%' THEN ratio END) AS gpt4o,
+          MIN(CASE WHEN LOWER(model) LIKE '%sonnet%' THEN ratio END) AS claude,
+          MIN(CASE WHEN LOWER(model) LIKE 'gemini%pro%' THEN ratio END) AS gemini,
+          MIN(CASE WHEN LOWER(model) LIKE 'deepseek%' THEN ratio END) AS deepseek,
+          MIN(CASE WHEN LOWER(model) LIKE 'kimi%' THEN ratio END) AS kimi,
+          MIN(CASE WHEN LOWER(model) LIKE 'glm%' THEN ratio END) AS glm,
+          MIN(CASE WHEN LOWER(model) LIKE 'qwen%' THEN ratio END) AS qwen,
+          MIN(ratio) AS minRatio
+        FROM platform_prices
+        WHERE platformId IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)}) AND needReview = 0
+        GROUP BY platformId
+      `)
+    : [[]];
+  const FAMILIES: [string, string][] = [
+    ["gpt5", "GPT-5"], ["gpt4o", "GPT-4o"], ["claude", "Claude"], ["gemini", "Gemini"],
+    ["deepseek", "DeepSeek"], ["kimi", "Kimi"], ["glm", "GLM"], ["qwen", "Qwen"],
+  ];
+  const priceByP = new Map<number, { hints: { label: string; ratio: number }[]; minRatio: number | null }>();
+  for (const r of (priceRows as unknown as [Record<string, unknown>[]])[0] ?? []) {
+    const hints: { label: string; ratio: number }[] = [];
+    for (const [col, label] of FAMILIES) {
+      if (r[col] != null) hints.push({ label, ratio: Number(r[col]) });
+    }
+    priceByP.set(Number(r.platformId), {
+      hints: hints.slice(0, 4),
+      minRatio: r.minRatio != null ? Number(r.minRatio) : null,
+    });
+  }
   // 最近 12 次探测
   const probeRows = await db
     .select()
@@ -86,7 +119,8 @@ async function withStats(db: ReturnType<typeof getDb>, rows: typeof platforms.$i
         : null;
     // 探测点条按时间正序（旧→新）返回
     const probes = (probesByP.get(p.id) ?? []).reverse();
-    return { ...p, daily: days, uptime, uptime7, avgLatency, modelCount: modelCount.get(p.id) ?? 0, probes };
+    const price = priceByP.get(p.id);
+    return { ...p, daily: days, uptime, uptime7, avgLatency, modelCount: modelCount.get(p.id) ?? 0, probes, priceHints: price?.hints ?? [], minRatio: price?.minRatio ?? null };
   });
 }
 

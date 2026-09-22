@@ -3,7 +3,7 @@ import { ExternalLink, MessageSquarePlus, Star, Scale } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import UptimeBar from "@/components/UptimeBar";
-import { fmtLatency, timeAgo, vendorColor, aiSummary } from "@/lib/format";
+import { fmtLatency, timeAgo, vendorColor, aiSummary, fmtRatio } from "@/lib/format";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -29,6 +29,10 @@ export interface CardPlatform {
   daily: { date: string; status: "ok" | "slow" | "down" | "nodata"; latencyMs: number | null }[];
   uptime7?: number | null;
   modelCount?: number;
+  /** 热门模型报价摘要（每族该站最低倍率） */
+  priceHints?: { label: string; ratio: number }[];
+  /** 全站最低计费倍率 */
+  minRatio?: number | null;
   apiConfirmed?: boolean;
   lastProbeAt?: Date | string | null;
   lastProbeLatency?: number | null;
@@ -141,6 +145,23 @@ export default function PlatformCard({
       {/* AI 优势总结：帮助用户快速判断该站是否适合自己（模板简介不展示） */}
       {aiSummary(p.description) && (
         <p className="text-xs text-muted-foreground leading-5 line-clamp-2">{aiSummary(p.description)}</p>
+      )}
+
+      {/* 热门模型报价：用户决策的核心依据 */}
+      {p.priceHints && p.priceHints.length > 0 && (
+        <div className="flex items-center gap-1 flex-wrap">
+          {p.priceHints.map((h) => (
+            <span
+              key={h.label}
+              className="text-[11px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-medium"
+            >
+              {h.label} {fmtRatio(h.ratio)}x
+            </span>
+          ))}
+          {p.minRatio != null && (
+            <span className="text-[11px] text-muted-foreground ml-auto">最低 {fmtRatio(p.minRatio)}x</span>
+          )}
+        </div>
       )}
 
       <div className="flex items-center gap-1.5 flex-wrap">
