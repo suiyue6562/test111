@@ -96,6 +96,20 @@ export const platformDailyStatus = mysqlTable(
 
 export type PlatformDailyStatus = typeof platformDailyStatus.$inferSelect;
 
+// ---------- 采集器运行记录 ----------
+export const collectorRuns = mysqlTable("collector_runs", {
+  id: serial("id").primaryKey(),
+  type: mysqlEnum("type", ["probe", "pricing"]).notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  finishedAt: timestamp("finishedAt"),
+  total: int("total").default(0).notNull(), // 本轮处理的站点数
+  okCount: int("okCount").default(0).notNull(), // 探测：正常数 / 价格：采集成功站点数
+  failCount: int("failCount").default(0).notNull(), // 探测：故障数 / 价格：无价格站点数
+  detail: varchar("detail", { length: 500 }).default("").notNull(), // 摘要，如 "ok:300 slow:20 down:150 unknown:44"
+});
+
+export type CollectorRun = typeof collectorRuns.$inferSelect;
+
 // ---------- 平台模型价格 ----------
 export const platformPrices = mysqlTable(
   "platform_prices",

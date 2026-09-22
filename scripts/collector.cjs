@@ -76,14 +76,42 @@ async function runOnce(pool) {
   console.log(`[collector] ${new Date().toISOString()} 探测 ${plats.length} 个平台`);
   const date = todayStr();
 
+  // 记录本轮探测运行
+  const [runRes] = await pool.query(
+    "INSERT INTO collector_runs (type, total) VALUES ('probe', ?)",
+    [plats.length],
+  );
+  const runId = runRes.insertId;
+  const tally = { ok: 0, slow: 0, down: 0, nodata: 0 };
+  const latencies = [];
+
   // 10 路并发探测，避免大量平台时单轮耗时过长
   const CHUNK = 10;
   for (let i = 0; i < plats.length; i += CHUNK) {
     const batch = plats.slice(i, i + CHUNK);
-    await Promise.allSettled(batch.map((p) => probeOne(pool, p, date)));
+    const results = await Promise.allSettled(batch.map((p) => probeOne(pool, p, date)));
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value) {
+        tally[r.value.status] = (tally[r.value.status] ?? 0) + 1;
+        if (r.value.latencyMs != null) latencies.push(r.value.latencyMs);
+      }
+    }
   }
 
   await recomputeScores(pool);
+
+  const avgLat = latencies.length
+    ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+    : null;
+  await pool.query(
+    "UPDATE collector_runs SET finishedAt = NOW(), okCount = ?, failCount = ?, detail = ? WHERE id = ?",
+    [
+      tally.ok,
+      tally.down,
+      `ok:${tally.ok} slow:${tally.slow} down:${tally.down} unknown:${tally.nodata}${avgLat != null ? ` avg:${avgLat}ms` : ""}`,
+      runId,
+    ],
+  );
 }
 
 async function probeOne(pool, p, date) {
@@ -136,8 +164,10 @@ async function probeOne(pool, p, date) {
     console.log(
       `[collector] ${p.name}: ${apiAlive ? "可达" : r.status === 404 ? "API未确认" : "不可达"} ${r.latencyMs ?? "-"}ms${r.apiConfirmed ? " [API已确认]" : ""}`,
     );
+    return { status: dayStatus, latencyMs: r.latencyMs };
   } catch (e) {
     console.error(`[collector] ${p.name} 探测异常:`, e.message);
+    return { status: "down", latencyMs: null };
   }
 }
 
@@ -330,7 +360,12 @@ async function collectAllPrices(pool) {
     "SELECT id, name, url, apiBaseUrl FROM platforms WHERE status IN ('operational','slow')",
   );
   console.log(`[pricing] ${new Date().toISOString()} 开始采集 ${plats.length} 个存活站点的价格`);
-  let ok = 0, totalItems = 0;
+  const [runRes] = await pool.query(
+    "INSERT INTO collector_runs (type, total) VALUES ('pricing', ?)",
+    [plats.length],
+  );
+  const runId = runRes.insertId;
+  let ok = 0, totalItems = 0, insertedTotal = 0, updatedTotal = 0;
   const CHUNK = 10;
   for (let i = 0; i < plats.length; i += CHUNK) {
     await Promise.allSettled(
@@ -340,11 +375,22 @@ async function collectAllPrices(pool) {
         const { inserted, updated } = await upsertPrices(pool, p.id, items);
         ok++;
         totalItems += items.length;
+        insertedTotal += inserted;
+        updatedTotal += updated;
         console.log(`[pricing] ${p.name}: ${items.length} 个模型（新增 ${inserted} 更新 ${updated}）`);
       }),
     );
   }
   console.log(`[pricing] 完成：${ok}/${plats.length} 个站点有公开价格，共 ${totalItems} 条`);
+  await pool.query(
+    "UPDATE collector_runs SET finishedAt = NOW(), okCount = ?, failCount = ?, detail = ? WHERE id = ?",
+    [
+      ok,
+      plats.length - ok,
+      `站点:${ok}/${plats.length} 模型:${totalItems} 新增:${insertedTotal} 更新:${updatedTotal}`,
+      runId,
+    ],
+  );
 }
 
 /* ------------------------------------------------------------------ */

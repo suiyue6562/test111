@@ -1,8 +1,11 @@
 import { useState } from "react";
 import {
   Shield, Database, Users as UsersIcon, MessageSquare, Gift,
-  UploadCloud, Star, Plus, Trash2, Pencil,
+  UploadCloud, Star, Plus, Trash2, Pencil, Radar,
 } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
+} from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -165,6 +168,16 @@ export default function Admin() {
   const { data: posts } = trpc.admin.listPosts.useQuery(undefined, { enabled: user?.role === "admin" });
   const { data: acts } = trpc.admin.listActivities.useQuery(undefined, { enabled: user?.role === "admin" });
   const { data: usrs } = trpc.admin.listUsers.useQuery(undefined, { enabled: user?.role === "admin" });
+  const { data: colOverview } = trpc.admin.collectorOverview.useQuery(undefined, {
+    enabled: user?.role === "admin",
+    refetchInterval: 60_000,
+  });
+  const { data: colTrend } = trpc.admin.collectorTrend.useQuery(undefined, { enabled: user?.role === "admin" });
+  const { data: colRuns } = trpc.admin.collectorRuns.useQuery(undefined, {
+    enabled: user?.role === "admin",
+    refetchInterval: 60_000,
+  });
+  const { data: colDown } = trpc.admin.collectorDownSites.useQuery(undefined, { enabled: user?.role === "admin" });
 
   const [editOpen, setEditOpen] = useState(false);
   const [editPlat, setEditPlat] = useState<(typeof plats extends (infer T)[] | undefined ? T : never) | null>(null);
@@ -250,6 +263,7 @@ export default function Admin() {
           <TabsTrigger value="posts">帖子管理</TabsTrigger>
           <TabsTrigger value="acts">活动管理</TabsTrigger>
           <TabsTrigger value="users">用户管理</TabsTrigger>
+          <TabsTrigger value="collector">采集监控</TabsTrigger>
         </TabsList>
 
         {/* 平台管理 */}
@@ -451,6 +465,143 @@ export default function Admin() {
                         {u.status === "active" ? "封禁" : "解封"}
                       </Button>
                     </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        {/* 采集监控 */}
+        <TabsContent value="collector" className="pt-4 space-y-4">
+          {/* 状态总览卡片 */}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            {[
+              { label: "正常站点", value: colOverview?.statusDist.operational, cls: "text-emerald-500" },
+              { label: "偏慢", value: colOverview?.statusDist.slow, cls: "text-amber-500" },
+              { label: "故障", value: colOverview?.statusDist.down, cls: "text-red-500" },
+              { label: "API 未确认", value: colOverview?.statusDist.unknown, cls: "text-muted-foreground" },
+              { label: "价格记录", value: colOverview?.priceTotal, cls: "text-indigo-500" },
+              { label: "覆盖站点", value: colOverview?.priceSites, cls: "text-indigo-500" },
+            ].map((s) => (
+              <div key={s.label} className="rounded-xl border bg-card p-3">
+                <div className="text-xs text-muted-foreground">{s.label}</div>
+                <div className={`text-xl font-bold mt-1 ${s.cls}`}>{s.value ?? "…"}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* 最近运行时间 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-xl border bg-card p-4 flex items-center gap-3">
+              <Radar className="w-5 h-5 text-indigo-500 shrink-0" />
+              <div>
+                <div className="text-sm font-medium">站点探测（每小时）</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {colOverview?.lastProbe
+                    ? `最近一轮：${fmtDateTime(colOverview.lastProbe.startedAt)} · ${colOverview.lastProbe.finishedAt ? colOverview.lastProbe.detail : "进行中…"}`
+                    : "暂无记录（采集器重启后自动开始）"}
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border bg-card p-4 flex items-center gap-3">
+              <Database className="w-5 h-5 text-indigo-500 shrink-0" />
+              <div>
+                <div className="text-sm font-medium">价格采集（每 24 小时）</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {colOverview?.lastPricing
+                    ? `最近一轮：${fmtDateTime(colOverview.lastPricing.startedAt)} · ${colOverview.lastPricing.finishedAt ? colOverview.lastPricing.detail : "进行中…"}`
+                    : "暂无记录"}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 14 天趋势图 */}
+          <div className="rounded-xl border bg-card p-4">
+            <div className="text-sm font-medium mb-3">近 14 天站点状态趋势</div>
+            {colTrend && colTrend.length > 0 ? (
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={colTrend}>
+                  <XAxis dataKey="date" tickFormatter={(d: string) => d.slice(5)} fontSize={12} />
+                  <YAxis fontSize={12} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="ok" name="正常" stackId="a" fill="#10b981" />
+                  <Bar dataKey="slow" name="偏慢" stackId="a" fill="#f59e0b" />
+                  <Bar dataKey="down" name="故障" stackId="a" fill="#ef4444" />
+                  <Bar dataKey="nodata" name="未确认" stackId="a" fill="#94a3b8" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="text-sm text-muted-foreground py-10 text-center">暂无趋势数据</div>
+            )}
+          </div>
+
+          {/* 运行记录 */}
+          <div className="rounded-xl border bg-card p-4 overflow-x-auto">
+            <div className="text-sm font-medium mb-3">最近运行记录</div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>类型</TableHead><TableHead>开始时间</TableHead><TableHead>耗时</TableHead>
+                  <TableHead>站点数</TableHead><TableHead>成功</TableHead><TableHead>失败</TableHead><TableHead>摘要</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {colRuns?.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell>
+                      <Badge variant={r.type === "probe" ? "default" : "secondary"}>
+                        {r.type === "probe" ? "探测" : "价格"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{fmtDateTime(r.startedAt)}</TableCell>
+                    <TableCell className="text-xs">
+                      {r.finishedAt
+                        ? `${Math.round((new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime()) / 1000)}s`
+                        : "进行中"}
+                    </TableCell>
+                    <TableCell>{r.total}</TableCell>
+                    <TableCell className="text-emerald-500">{r.okCount}</TableCell>
+                    <TableCell className="text-red-500">{r.failCount}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{r.detail}</TableCell>
+                  </TableRow>
+                ))}
+                {(!colRuns || colRuns.length === 0) && (
+                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-6">暂无运行记录</TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* 故障站点 */}
+          <div className="rounded-xl border bg-card p-4 overflow-x-auto">
+            <div className="text-sm font-medium mb-3">
+              故障 / 未确认站点（{colDown?.length ?? 0}）
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>名称</TableHead><TableHead>域名</TableHead><TableHead>当前状态</TableHead>
+                  <TableHead>今日探测</TableHead><TableHead>延迟</TableHead><TableHead>评分</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {colDown?.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell className="font-medium">{p.name}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{p.domain}</TableCell>
+                    <TableCell>
+                      <Badge variant={p.status === "down" ? "destructive" : "outline"}>
+                        {p.status === "down" ? "故障" : "未确认"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {p.todayStatus === "ok" ? "正常" : p.todayStatus === "slow" ? "偏慢" : p.todayStatus === "down" ? "故障" : "无数据"}
+                    </TableCell>
+                    <TableCell className="text-xs">{p.todayLatency != null ? `${p.todayLatency}ms` : "-"}</TableCell>
+                    <TableCell className="text-xs">{Number(p.score).toFixed(1)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

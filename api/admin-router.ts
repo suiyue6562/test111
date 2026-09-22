@@ -6,6 +6,7 @@ import {
   platforms,
   platformPrices,
   platformDailyStatus,
+  collectorRuns,
   reviews,
   forumPosts,
   forumComments,
@@ -360,6 +361,100 @@ export const adminRouter = createRouter({
       await getDb().update(skrActivities).set({ status: "ended" }).where(eq(skrActivities.id, input.id));
       return { success: true };
     }),
+
+  // ---------- 采集监控 ----------
+  /** 总览：站点状态分布、价格数据规模、最近一次探测/价格采集 */
+  collectorOverview: adminQuery.query(async () => {
+    const db = getDb();
+    const statusRows = await db
+      .select({ status: platforms.status, n: sql<number>`count(*)` })
+      .from(platforms)
+      .groupBy(platforms.status);
+    const [price] = await db
+      .select({
+        total: sql<number>`count(*)`,
+        sites: sql<number>`count(distinct ${platformPrices.platformId})`,
+      })
+      .from(platformPrices);
+    const [lastProbe] = await db
+      .select()
+      .from(collectorRuns)
+      .where(eq(collectorRuns.type, "probe"))
+      .orderBy(desc(collectorRuns.id))
+      .limit(1);
+    const [lastPricing] = await db
+      .select()
+      .from(collectorRuns)
+      .where(eq(collectorRuns.type, "pricing"))
+      .orderBy(desc(collectorRuns.id))
+      .limit(1);
+    const dist: Record<string, number> = { operational: 0, slow: 0, down: 0, unknown: 0 };
+    for (const r of statusRows) dist[r.status] = Number(r.n);
+    return {
+      statusDist: dist,
+      priceTotal: Number(price?.total ?? 0),
+      priceSites: Number(price?.sites ?? 0),
+      lastProbe: lastProbe ?? null,
+      lastPricing: lastPricing ?? null,
+    };
+  }),
+
+  /** 近 14 天探测趋势（每天 ok/slow/down/nodata 数量） */
+  collectorTrend: adminQuery.query(async () => {
+    const db = getDb();
+    const rows = await db
+      .select({
+        date: platformDailyStatus.date,
+        status: platformDailyStatus.status,
+        n: sql<number>`count(*)`,
+        avgLatency: sql<number>`round(avg(${platformDailyStatus.latencyMs}))`,
+      })
+      .from(platformDailyStatus)
+      .groupBy(platformDailyStatus.date, platformDailyStatus.status)
+      .orderBy(desc(platformDailyStatus.date))
+      .limit(14 * 4);
+    const byDate = new Map<string, { date: string; ok: number; slow: number; down: number; nodata: number; avgLatency: number | null }>();
+    for (const r of rows) {
+      if (!byDate.has(r.date)) {
+        byDate.set(r.date, { date: r.date, ok: 0, slow: 0, down: 0, nodata: 0, avgLatency: null });
+      }
+      const d = byDate.get(r.date)!;
+      d[r.status] = Number(r.n);
+      if (r.status === "ok" && r.avgLatency != null) d.avgLatency = Number(r.avgLatency);
+    }
+    return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-14);
+  }),
+
+  /** 最近采集运行记录 */
+  collectorRuns: adminQuery.query(async () => {
+    return getDb().select().from(collectorRuns).orderBy(desc(collectorRuns.id)).limit(30);
+  }),
+
+  /** 当前故障/未确认的站点列表 */
+  collectorDownSites: adminQuery.query(async () => {
+    const db = getDb();
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+    return db
+      .select({
+        id: platforms.id,
+        name: platforms.name,
+        domain: platforms.domain,
+        url: platforms.url,
+        status: platforms.status,
+        score: platforms.score,
+        todayStatus: platformDailyStatus.status,
+        todayLatency: platformDailyStatus.latencyMs,
+      })
+      .from(platforms)
+      .leftJoin(
+        platformDailyStatus,
+        sql`${platformDailyStatus.platformId} = ${platforms.id} AND ${platformDailyStatus.date} = ${dateStr}`,
+      )
+      .where(sql`${platforms.status} IN ('down','unknown') AND ${platforms.stage} != 'closed'`)
+      .orderBy(desc(platforms.score))
+      .limit(100);
+  }),
 
   // ---------- 用户管理 ----------
   listUsers: adminQuery.query(async () => {
