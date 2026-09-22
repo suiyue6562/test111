@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { trpc } from "@/providers/trpc";
 import { AdBanner, SideAdRails, AdPopup } from "@/components/AdZones";
+import ComplianceGate from "@/components/ComplianceGate";
 
 const FORUM_CATS = [
   { slug: "general", name: "综合交流" },
@@ -263,6 +264,9 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
       {/* 侧栏 + 弹窗广告 */}
       <SideAdRails />
       <AdPopup />
+
+      {/* 合规确认弹窗：首次访问强制确认，层级最高 */}
+      <ComplianceGate />
     </div>
   );
 }
