@@ -8,10 +8,13 @@ import { fmtLatency } from "@/lib/format";
 
 interface TestResult {
   ok: boolean;
+  verified?: boolean;
+  noAuth?: boolean;
   latencyMs: number;
   httpStatus?: number;
   modelCount?: number;
   models?: string[];
+  quota?: { hardLimitUsd: number } | null;
   message: string;
 }
 
@@ -71,7 +74,7 @@ export default function Skt() {
           )}
         </Button>
         <p className="text-xs text-muted-foreground">
-          检测仅请求一次 /models 接口，不会消耗你的对话额度。Key 不会被保存。
+          检测会请求 /models 与额度查询接口（双请求对比验证），不会消耗你的对话额度。Key 不会被保存。
         </p>
       </div>
 
@@ -91,6 +94,26 @@ export default function Skt() {
               <div className="text-lg font-bold">{fmtLatency(result.latencyMs)}</div>
               <div className="text-xs text-muted-foreground">响应延迟</div>
             </div>
+          </div>
+          {/* 验证状态 */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {result.ok && result.verified && (
+              <Badge className="bg-emerald-600 hover:bg-emerald-600">已验证 Key 有效</Badge>
+            )}
+            {result.ok && result.noAuth && (
+              <Badge className="bg-amber-500 hover:bg-amber-500">免鉴权站点 · Key 未经验证</Badge>
+            )}
+            {!result.ok && result.verified && (
+              <Badge variant="destructive">Key 确认无效</Badge>
+            )}
+            {result.httpStatus != null && (
+              <Badge variant="outline" className="font-mono">HTTP {result.httpStatus}</Badge>
+            )}
+            {result.quota && (
+              <Badge variant="secondary">
+                账户额度 ${result.quota.hardLimitUsd.toFixed(2)}
+              </Badge>
+            )}
           </div>
           {result.ok && (
             <>

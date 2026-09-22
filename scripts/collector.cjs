@@ -24,9 +24,8 @@ function todayStr() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-async function probe(apiBaseUrl) {
-  const base = (apiBaseUrl || "").replace(/\/+$/, "");
-  if (!base) return { ok: false, latencyMs: null };
+/** 探测单个 API base：返回可达性、HTTP 状态、是否为真实 API（需鉴权或返回模型列表） */
+async function probeBase(base) {
   const started = Date.now();
   try {
     const ctrl = new AbortController();
@@ -34,12 +33,38 @@ async function probe(apiBaseUrl) {
     const res = await fetch(`${base}/models`, { signal: ctrl.signal, redirect: "manual" });
     clearTimeout(timer);
     const latencyMs = Date.now() - started;
-    // 200 正常；401/403 说明服务在线但需鉴权，也视为可达
-    const reachable = res.status < 500;
-    return { ok: reachable, latencyMs };
+    let apiConfirmed = res.status === 401 || res.status === 403;
+    if (res.status === 200) {
+      try {
+        const j = await res.json();
+        apiConfirmed = Array.isArray(j?.data);
+      } catch {
+        apiConfirmed = false;
+      }
+    }
+    return { reachable: res.status < 500, status: res.status, latencyMs, apiConfirmed, base };
   } catch {
-    return { ok: false, latencyMs: Date.now() - started };
+    return { reachable: false, status: 0, latencyMs: Date.now() - started, apiConfirmed: false, base };
   }
+}
+
+/** 探测平台：按 apiBaseUrl、站点根/v1 顺序尝试，404 时自动换路径 */
+async function probe(platform) {
+  const bases = [];
+  const apiBase = (platform.apiBaseUrl || "").replace(/\/+$/, "");
+  if (apiBase) bases.push(apiBase);
+  const rootV1 = `${platform.url.replace(/\/+$/, "")}/v1`;
+  if (!bases.includes(rootV1)) bases.push(rootV1);
+
+  let last = null;
+  for (const b of bases) {
+    const r = await probeBase(b);
+    last = r;
+    if (r.status === 404) continue; // 路径不对，尝试下一个
+    if (r.reachable) return r;
+    if (r.status === 0) continue; // 网络失败，尝试下一个候选
+  }
+  return last ?? { reachable: false, status: 0, latencyMs: null, apiConfirmed: false, base: bases[0] ?? "" };
 }
 
 const WORST = { ok: 0, slow: 1, down: 2, nodata: -1 };
@@ -63,10 +88,11 @@ async function runOnce(pool) {
 
 async function probeOne(pool, p, date) {
   try {
-    const apiBase = p.apiBaseUrl || `${p.url.replace(/\/+$/, "")}/v1`;
-    const r = await probe(apiBase);
+    const r = await probe(p);
+    // 全部候选路径 404：站点在线但 API 中转能力未确认，记为 unknown
+    const apiAlive = r.reachable && r.status !== 404;
     let dayStatus;
-    if (!r.ok) dayStatus = "down";
+    if (!apiAlive) dayStatus = r.status === 404 ? "nodata" : "down";
     else if (r.latencyMs != null && r.latencyMs > 3000) dayStatus = "slow";
     else dayStatus = "ok";
 
@@ -96,12 +122,20 @@ async function probeOne(pool, p, date) {
       );
     }
 
-    // 平台总状态跟随最新探测
-    const newStatus = !r.ok ? "down" : r.latencyMs > 3000 ? "slow" : "operational";
+    // 平台总状态跟随最新探测（全部路径 404 → unknown，不纳入可用率统计）
+    const newStatus =
+      dayStatus === "nodata" ? "unknown" : !apiAlive ? "down" : r.latencyMs > 3000 ? "slow" : "operational";
     if (newStatus !== p.status) {
       await pool.query("UPDATE platforms SET status = ? WHERE id = ?", [newStatus, p.id]);
     }
-    console.log(`[collector] ${p.name}: ${r.ok ? "可达" : "不可达"} ${r.latencyMs ?? "-"}ms`);
+    // 若在备选路径上确认了真实 API，自动纠正 apiBaseUrl
+    if (r.apiConfirmed && r.base && r.base !== (p.apiBaseUrl || "").replace(/\/+$/, "")) {
+      await pool.query("UPDATE platforms SET apiBaseUrl = ? WHERE id = ?", [r.base, p.id]);
+      console.log(`[collector] ${p.name}: apiBaseUrl 自动纠正为 ${r.base}`);
+    }
+    console.log(
+      `[collector] ${p.name}: ${apiAlive ? "可达" : r.status === 404 ? "API未确认" : "不可达"} ${r.latencyMs ?? "-"}ms${r.apiConfirmed ? " [API已确认]" : ""}`,
+    );
   } catch (e) {
     console.error(`[collector] ${p.name} 探测异常:`, e.message);
   }

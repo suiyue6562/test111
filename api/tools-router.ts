@@ -67,8 +67,125 @@ export const sksRouter = createRouter({
 });
 
 // ---------- SKT 检测 ----------
+/** 简单内存限流：每 IP 每分钟最多 10 次检测 */
+const sktRateMap = new Map<string, number[]>();
+function sktRateLimit(ip: string, limit = 10, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const arr = (sktRateMap.get(ip) ?? []).filter((t) => now - t < windowMs);
+  if (arr.length >= limit) {
+    sktRateMap.set(ip, arr);
+    return false;
+  }
+  arr.push(now);
+  sktRateMap.set(ip, arr);
+  return true;
+}
+
+/** SSRF 防护：禁止指向内网/保留地址 */
+function isPrivateIp(ip: string): boolean {
+  const m = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return true;
+    if (a === 169 && b === 254) return true; // 链路本地 / 云元数据
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT / 阿里云内网
+    return false;
+  }
+  const low = ip.toLowerCase();
+  return (
+    low === "::1" ||
+    low.startsWith("fe80") ||
+    low.startsWith("fc") ||
+    low.startsWith("fd") ||
+    low === "::"
+  );
+}
+
+async function assertPublicUrl(rawUrl: string): Promise<string> {
+  let base = rawUrl.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
+  if (!base.endsWith("/v1")) base = `${base}/v1`;
+  let u: URL;
+  try {
+    u = new URL(base);
+  } catch {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "地址格式不正确" });
+  }
+  const host = u.hostname.toLowerCase();
+  if (
+    host === "localhost" ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    isPrivateIp(host)
+  ) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "不允许检测内网地址" });
+  }
+  // 解析域名，防止 DNS 指向内网
+  const { lookup } = await import("node:dns/promises");
+  try {
+    const { address } = await lookup(host);
+    if (isPrivateIp(address)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "该域名解析到内网地址，已拦截" });
+    }
+  } catch (e) {
+    if (e instanceof TRPCError) throw e;
+    throw new TRPCError({ code: "BAD_REQUEST", message: "域名无法解析" });
+  }
+  return base;
+}
+
+function classifyNetError(e: unknown): string {
+  if (e instanceof Error) {
+    if (e.name === "AbortError") return "请求超时（15s）";
+    const cause = (e as { cause?: { code?: string } }).cause;
+    const code = cause?.code ?? "";
+    if (code === "ENOTFOUND") return "域名解析失败（站点不存在或已关闭）";
+    if (code === "ECONNREFUSED") return "连接被拒绝（站点已停服或端口未开放）";
+    if (code === "ECONNRESET") return "连接被重置";
+    if (code.startsWith("CERT") || code.includes("SSL") || code.includes("TLS"))
+      return "TLS 证书错误（证书过期或不受信任）";
+    if (code === "ETIMEDOUT") return "连接超时";
+  }
+  return "无法连接目标站点";
+}
+
+interface SktFetchResult {
+  kind: "ok" | "http" | "net";
+  status?: number;
+  latencyMs: number;
+  models?: string[];
+  errorMsg?: string;
+}
+
+async function sktFetchModels(base: string, apiKey?: string): Promise<SktFetchResult> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const resp = await fetch(`${base}/models`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+      signal: controller.signal,
+      redirect: "manual", // 不跟随重定向，防止绕过 SSRF 防护
+    });
+    const latencyMs = Date.now() - started;
+    if (resp.status !== 200) {
+      return { kind: "http", status: resp.status, latencyMs };
+    }
+    const data = (await resp.json()) as { data?: Array<{ id: string }> };
+    const models = Array.isArray(data?.data) ? data.data.map((m) => m.id) : [];
+    return { kind: "ok", status: 200, latencyMs, models };
+  } catch (e) {
+    return { kind: "net", latencyMs: Date.now() - started, errorMsg: classifyNetError(e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const sktRouter = createRouter({
-  /** 真实的 Key 可用性检测：请求目标站 /models */
+  /** Key 可用性检测：带 Key 与不带 Key 双请求对比验证 + 额度探测 */
   test: publicQuery
     .input(
       z.object({
@@ -76,49 +193,71 @@ export const sktRouter = createRouter({
         apiKey: z.string().min(3).max(300),
       }),
     )
-    .mutation(async ({ input }) => {
-      let base = input.baseUrl.trim().replace(/\/+$/, "");
-      if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
-      if (!base.endsWith("/v1")) base = `${base}/v1`;
-      const started = Date.now();
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
-      try {
-        const resp = await fetch(`${base}/models`, {
-          headers: { Authorization: `Bearer ${input.apiKey}` },
-          signal: controller.signal,
-        });
-        const latencyMs = Date.now() - started;
-        if (!resp.ok) {
-          return {
-            ok: false,
-            latencyMs,
-            httpStatus: resp.status,
-            message:
-              resp.status === 401
-                ? "Key 无效或无权限（401）"
-                : `站点返回错误状态 ${resp.status}`,
-          };
-        }
-        const data = (await resp.json()) as { data?: Array<{ id: string }> };
-        const models = Array.isArray(data?.data) ? data.data.map((m) => m.id) : [];
-        return {
-          ok: true,
-          latencyMs,
-          httpStatus: resp.status,
-          modelCount: models.length,
-          models: models.slice(0, 100),
-          message: "Key 可用，模型列表获取成功",
-        };
-      } catch (e) {
-        return {
-          ok: false,
-          latencyMs: Date.now() - started,
-          message: e instanceof Error && e.name === "AbortError" ? "请求超时（15s）" : "无法连接目标站点",
-        };
-      } finally {
-        clearTimeout(timer);
+    .mutation(async ({ input, ctx }) => {
+      const ip = (ctx.req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
+      if (!sktRateLimit(ip)) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "检测过于频繁，请一分钟后再试" });
       }
+      const base = await assertPublicUrl(input.baseUrl);
+
+      // 1) 带 Key 请求
+      const withKey = await sktFetchModels(base, input.apiKey);
+      if (withKey.kind === "net") {
+        return { ok: false, verified: false, latencyMs: withKey.latencyMs, message: withKey.errorMsg! };
+      }
+      if (withKey.kind === "http") {
+        const s = withKey.status!;
+        const msg =
+          s === 401
+            ? "Key 无效或无权限（401）"
+            : s === 403
+              ? "Key 被拒绝访问（403）"
+              : s === 429
+                ? "站点限流中（429），Key 状态未知"
+                : s === 404
+                  ? "未找到 /models 接口，该站点可能不是标准 OpenAI 兼容中转"
+                  : `站点返回错误状态 ${s}`;
+        return { ok: false, verified: s === 401 || s === 403, latencyMs: withKey.latencyMs, httpStatus: s, message: msg };
+      }
+
+      // 2) 带 Key 成功：再发无 Key 请求做对比验证
+      const models = withKey.models ?? [];
+      const noKey = await sktFetchModels(base);
+      const noAuth = noKey.kind === "ok"; // 不带 Key 也能拿到列表 → 站点免鉴权
+      const verified = noKey.kind === "http" && (noKey.status === 401 || noKey.status === 403);
+
+      // 3) 额度探测（尽力而为，不影响主结果）
+      let quota: { hardLimitUsd: number } | null = null;
+      try {
+        const q = await fetch(`${base}/dashboard/billing/subscription`, {
+          headers: { Authorization: `Bearer ${input.apiKey}` },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (q.ok) {
+          const qd = (await q.json()) as { hard_limit_usd?: number };
+          if (typeof qd?.hard_limit_usd === "number") {
+            quota = { hardLimitUsd: qd.hard_limit_usd };
+          }
+        }
+      } catch {
+        /* 忽略额度探测失败 */
+      }
+
+      return {
+        ok: true,
+        verified,
+        noAuth,
+        latencyMs: withKey.latencyMs,
+        httpStatus: 200,
+        modelCount: models.length,
+        models: models.slice(0, 100),
+        quota,
+        message: noAuth
+          ? "模型列表获取成功，但该站点无需鉴权，无法确认 Key 真伪"
+          : verified
+            ? "Key 有效（已通过无 Key 对比验证）"
+            : "Key 可用，模型列表获取成功",
+      };
     }),
 });
 
