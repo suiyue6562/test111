@@ -21,14 +21,20 @@ else
   echo "skip npm ci (lockfile unchanged)"
 fi
 
-# 构建：1G 内存机器上先停应用腾内存、限制构建堆内存；失败则回滚 dist
+# 构建：1G 内存机器上先停应用和采集器腾内存、限制构建堆内存；失败则回滚 dist
 cp -r dist dist.bak 2>/dev/null || true
-pm2 stop sk-buy || true
-if ! NODE_OPTIONS=--max-old-space-size=640 npm run build; then
-  echo "[warn] build failed, restoring previous dist"
-  rm -rf dist && mv dist.bak dist
-  pm2 restart sk-buy
-  exit 1
+pm2 stop sk-buy sk-buy-collector || true
+sync
+if ! NODE_OPTIONS=--max-old-space-size=768 npm run build; then
+  echo "[warn] build failed, retry once after gc"
+  sleep 3
+  if ! NODE_OPTIONS=--max-old-space-size=768 npm run build; then
+    echo "[warn] build failed twice, restoring previous dist"
+    rm -rf dist && mv dist.bak dist
+    pm2 restart sk-buy sk-buy-collector
+    pm2 save
+    exit 1
+  fi
 fi
 rm -rf dist.bak
 
