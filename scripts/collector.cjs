@@ -422,8 +422,12 @@ async function fetchPlatformPrices(platform) {
       for (const g of enabled) {
         const gr = Number(groupRatios[g]);
         if (m.quota_type === 1 && Number(m.model_price) > 0) {
-          // 按次计费：model_price 为 quota（$1 = 500000 quota）
-          const cost = ((Number(m.model_price) / 500000) * USD_CNY * gr).toFixed(4);
+          // 按次计费：model_price 语义有两种 —— 大部份 new-api 分叉存美元单价，官方实现存 quota（$1 = 500000 quota）。
+          // mp < 1000 时按美元解读，否则按 quota 解读；避免 0.1 被当成 quota 后舍入成 0.0000。
+          const mp = Number(m.model_price);
+          const usd = mp < 1000 ? mp : mp / 500000;
+          const cost = (usd * USD_CNY * gr).toFixed(4);
+          if (!(Number(cost) > 0)) continue; // 无法正确定价则跳过该组，不写 0 价
           items.push({ vendor: vendorOf(model), model, groupName: g, ratio: "0", shortCost: cost, longCost: cost, source: "api_pricing" });
         } else {
           const mr = Number(m.model_ratio);
