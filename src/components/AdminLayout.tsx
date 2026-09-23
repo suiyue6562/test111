@@ -8,7 +8,7 @@ import NotFound from "@/pages/NotFound";
  * 独立管理后台布局：与用户前台完全分离
  * - 不包含用户端的侧边栏导航、搜索、语言切换等前台元素
  * - 非管理员访问一律渲染 404，不暴露后台的存在
- * - 入口不出现在用户端任何导航中，仅通过直接访问 /admin 进入
+ * - 入口不出现在用户端任何导航中，仅通过直接访问隐藏路径 /suiyue1987 进入（不出现在任何导航/链接中）
  */
 export default function AdminLayout() {
   const { user, isLoading, logout } = useAuth();

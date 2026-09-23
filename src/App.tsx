@@ -56,7 +56,7 @@ export default function App() {
             <Route path="*" element={<NotFound />} />
           </Route>
           {/* 独立管理后台：不使用前台布局，与 UserCenter 完全分离 */}
-          <Route path="/admin" element={<AdminLayout />}>
+          <Route path="/suiyue1987" element={<AdminLayout />}>
             <Route index element={<Admin />} />
           </Route>
         </Routes>
