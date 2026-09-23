@@ -48091,6 +48091,7 @@ var platforms = mysqlTable(
     // 价格采集健康度：连续失败次数与"价格待核实"标记（>=3 次失败置 1，成功后清零）
     priceFailCount: int2("priceFailCount").default(0).notNull(),
     priceStale: boolean4("priceStale").default(false).notNull(),
+    webBlocked: boolean4("webBlocked").default(false).notNull(),
     ownerId: bigint4("ownerId", { mode: "number", unsigned: true }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().notNull().$onUpdate(() => /* @__PURE__ */ new Date())
