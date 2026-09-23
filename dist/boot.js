@@ -52764,7 +52764,7 @@ ${items}
     const sameName = String(p.name).trim().toLowerCase() === String(p.domain).trim().toLowerCase();
     const displayName = sameName ? p.name : `${p.name}\uFF08${p.domain}\uFF09`;
     const rawDesc = String(p.description ?? "").replace(
-      /[^。；，!?！？,]*?(?:倍率\s*达?\s*0\.0\d+|0\.0\d+\s*倍)[^。；，!?！？,]*[。；，!?！？,]?/g,
+      /[^。；，!?！？,]*?(?:倍率[^。；，!?！？,0-9]{0,4}0\.0\d+|0\.0\d+\s*倍)[^。；，!?！？,]*[。；，!?！？,]?/g,
       ""
     ).slice(0, 80);
     const [minRow] = await db.select({ minRatio: sql`MIN(${platformPrices.ratio})` }).from(platformPrices).where(
