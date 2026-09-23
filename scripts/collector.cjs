@@ -570,7 +570,7 @@ async function collectAllPrices(pool) {
         if (!res) {
           // 采集失败：累计失败次数，连续 >=3 次打"价格待核实"标记（前端提示数据可能过期）
           const [u] = await pool.query(
-            "UPDATE platforms SET priceFailCount = priceFailCount + 1, priceStale = IF(priceFailCount + 1 >= 3, 1, priceStale) WHERE id = ?",
+            "UPDATE platforms SET priceFailCount = priceFailCount + 1, priceStale = IF(priceFailCount >= 3, 1, priceStale) WHERE id = ?",
             [p.id],
           );
           if (u.affectedRows > 0) {
