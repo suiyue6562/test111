@@ -142,6 +142,14 @@ export default function PlatformDetail() {
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-bold">{p.name}</h1>
               <span className={`text-[11px] px-1.5 py-0.5 rounded ${testCls}`}>{testLabel}</span>
+              {p.webBlocked ? (
+                <span
+                  title="首页被防护拦截(403)，API 服务正常，访问有门槛"
+                  className="text-[11px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400"
+                >
+                  访问受限
+                </span>
+              ) : null}
               <Badge variant="secondary" className="text-[11px]">{STAGE_LABEL[p.stage] ?? p.stage}</Badge>
             </div>
             <div className="text-sm text-muted-foreground mt-0.5">{p.url}</div>

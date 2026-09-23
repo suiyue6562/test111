@@ -30,6 +30,7 @@ async function main() {
     ["lastProbeLatency", "ALTER TABLE platforms ADD COLUMN lastProbeLatency INT NULL DEFAULT NULL AFTER lastProbeAt"],
     ["priceFailCount", "ALTER TABLE platforms ADD COLUMN priceFailCount INT NOT NULL DEFAULT 0 AFTER lastProbeLatency"],
     ["priceStale", "ALTER TABLE platforms ADD COLUMN priceStale TINYINT(1) NOT NULL DEFAULT 0 AFTER priceFailCount"],
+    ["webBlocked", "ALTER TABLE platforms ADD COLUMN webBlocked TINYINT(1) NOT NULL DEFAULT 0 AFTER priceStale"],
   ];
   for (const [col, sql] of adds) {
     if (await columnExists(conn, "platforms", col)) {

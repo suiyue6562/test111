@@ -50538,15 +50538,15 @@ async function withStats(db, rows) {
   const modelCount = new Map(modelRows.map((r) => [r.platformId, Number(r.n)]));
   const priceRows = ids.length ? await db.execute(sql`
         SELECT platformId,
-          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND (LOWER(model) LIKE 'gpt-5%' OR LOWER(model) LIKE '%/gpt-5%') THEN ratio END) AS gpt5,
-          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND (LOWER(model) LIKE 'gpt-4o%' OR LOWER(model) LIKE '%/gpt-4o%') THEN ratio END) AS gpt4o,
-          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND LOWER(model) LIKE '%sonnet%' THEN ratio END) AS claude,
-          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND (LOWER(model) LIKE 'gemini%pro%' OR LOWER(model) LIKE '%/gemini%pro%') THEN ratio END) AS gemini,
-          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND LOWER(model) LIKE '%deepseek%' THEN ratio END) AS deepseek,
-          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND LOWER(model) LIKE '%kimi%' THEN ratio END) AS kimi,
-          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND (LOWER(model) LIKE 'glm%' OR LOWER(model) LIKE '%/glm%') THEN ratio END) AS glm,
-          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND LOWER(model) LIKE '%qwen%' THEN ratio END) AS qwen,
-          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 THEN ratio END) AS minRatio
+          MIN(CASE WHEN ratio > 0 AND (LOWER(model) LIKE 'gpt-5%' OR LOWER(model) LIKE '%/gpt-5%') THEN ratio END) AS gpt5,
+          MIN(CASE WHEN ratio > 0 AND (LOWER(model) LIKE 'gpt-4o%' OR LOWER(model) LIKE '%/gpt-4o%') THEN ratio END) AS gpt4o,
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE '%sonnet%' THEN ratio END) AS claude,
+          MIN(CASE WHEN ratio > 0 AND (LOWER(model) LIKE 'gemini%pro%' OR LOWER(model) LIKE '%/gemini%pro%') THEN ratio END) AS gemini,
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE '%deepseek%' THEN ratio END) AS deepseek,
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE '%kimi%' THEN ratio END) AS kimi,
+          MIN(CASE WHEN ratio > 0 AND (LOWER(model) LIKE 'glm%' OR LOWER(model) LIKE '%/glm%') THEN ratio END) AS glm,
+          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE '%qwen%' THEN ratio END) AS qwen,
+          MIN(CASE WHEN ratio > 0 THEN ratio END) AS minRatio
         FROM platform_prices
         WHERE platformId IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)}) AND needReview = 0
         GROUP BY platformId
@@ -51166,7 +51166,6 @@ var pricingRouter = createRouter({
       const cost = Number(r.shortCost);
       const v = ratio > 0 ? { e: ratio, isRatio: true } : cost > 0 ? { e: cost, isRatio: false } : null;
       if (!v) continue;
-      if (v.isRatio && (v.e < 0.1 || v.e > 20)) continue;
       const e0 = byLabel.get(c.label) ?? { family: c.family, pm: /* @__PURE__ */ new Map() };
       const cur = e0.pm.get(r.platformId);
       if (!cur || v.e < cur.e) e0.pm.set(r.platformId, v);

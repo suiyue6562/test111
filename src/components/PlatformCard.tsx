@@ -39,6 +39,8 @@ export interface CardPlatform {
   lastProbeAt?: Date | string | null;
   lastProbeLatency?: number | null;
   probes?: { status: "ok" | "slow" | "down" | "nodata"; latencyMs: number | null }[];
+  /** 首页被防护拦截(403)但 API 可用：站还活着，访问有门槛 */
+  webBlocked?: boolean | null;
 }
 
 /** 实测状态分级（对齐行业惯例）：已实测 / 持续监测 / 尚未验证 */
@@ -141,6 +143,16 @@ export default function PlatformCard({
             <span className={`w-1.5 h-1.5 rounded-full ${sm.dot}`} />
             {sm.label}
           </Badge>
+          {p.webBlocked ? (
+            <Badge
+              variant="outline"
+              title="首页被防护拦截(403)，API 服务正常，访问有门槛"
+              className="gap-1 border-sky-500/30 text-sky-600 dark:text-sky-400"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
+              访问受限
+            </Badge>
+          ) : null}
         </div>
       </div>
 

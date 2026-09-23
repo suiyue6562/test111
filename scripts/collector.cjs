@@ -214,10 +214,13 @@ async function probeOne(pool, p, date) {
     const web = await probeWeb(p.url);
     // 全部候选路径 404：站点在线但 API 中转能力未确认，记为 unknown
     const apiAlive = r.reachable && r.status !== 404;
-    // 用户可用 = API 活着 且 首页打得开；首页打不开直接判 down（不上推荐、计不可用）
-    const usable = apiAlive && web.webAlive;
+    // 403 拦截 ≠ 站挂：API 已确认但首页被防护(403)拦截的站打"访问受限"标记，保持可用（榜单信息更完整）
+    const webRestricted = apiAlive && !web.webAlive && web.webStatus === 403;
+    // 用户可用 = API 活着 且 (首页打得开 或 仅 403 访问受限)
+    const usable = apiAlive && (web.webAlive || webRestricted);
     let dayStatus;
     if (!apiAlive) dayStatus = r.status === 404 ? "nodata" : "down";
+    else if (webRestricted) dayStatus = r.latencyMs != null && r.latencyMs > 3000 ? "slow" : "ok";
     else if (!web.webAlive) dayStatus = "down";
     else if (r.latencyMs != null && r.latencyMs > 3000) dayStatus = "slow";
     else dayStatus = "ok";
@@ -254,6 +257,8 @@ async function probeOne(pool, p, date) {
     if (newStatus !== p.status) {
       await pool.query("UPDATE platforms SET status = ? WHERE id = ?", [newStatus, p.id]);
     }
+    // 访问受限标记：仅 403 拦截且 API 可用时为 1；首页恢复或 API 不通时清零
+    await pool.query("UPDATE platforms SET webBlocked = ? WHERE id = ?", [webRestricted ? 1 : 0, p.id]);
     // 若在备选路径上确认了真实 API，自动纠正 apiBaseUrl
     if (r.apiConfirmed && r.base && r.base !== (p.apiBaseUrl || "").replace(/\/+$/, "")) {
       await pool.query("UPDATE platforms SET apiBaseUrl = ? WHERE id = ?", [r.base, p.id]);
@@ -275,7 +280,7 @@ async function probeOne(pool, p, date) {
       [r.latencyMs, r.apiConfirmed ? 1 : 0, p.id],
     );
     console.log(
-      `[collector] ${p.name}: ${usable ? "可达" : !web.webAlive && apiAlive ? "首页打不开" : r.status === 404 ? "API未确认" : "不可达"} ${r.latencyMs ?? "-"}ms${!web.webAlive ? ` [web:${web.webStatus}]` : ""}${r.apiConfirmed ? " [API已确认]" : ""}`,
+      `[collector] ${p.name}: ${webRestricted ? "访问受限" : usable ? "可达" : !web.webAlive && apiAlive ? "首页打不开" : r.status === 404 ? "API未确认" : "不可达"} ${r.latencyMs ?? "-"}ms${!web.webAlive ? ` [web:${web.webStatus}]` : ""}${r.apiConfirmed ? " [API已确认]" : ""}`,
     );
     return { status: dayStatus, latencyMs: r.latencyMs };
   } catch (e) {

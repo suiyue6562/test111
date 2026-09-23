@@ -72,6 +72,7 @@ export const platforms = mysqlTable(
     // 价格采集健康度：连续失败次数与"价格待核实"标记（>=3 次失败置 1，成功后清零）
     priceFailCount: int("priceFailCount").default(0).notNull(),
     priceStale: boolean("priceStale").default(false).notNull(),
+    webBlocked: boolean("webBlocked").default(false).notNull(),
     ownerId: bigint("ownerId", { mode: "number", unsigned: true }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt")
