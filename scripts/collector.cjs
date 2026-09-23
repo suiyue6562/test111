@@ -70,9 +70,9 @@ async function probe(platform) {
 const WORST = { ok: 0, slow: 1, down: 2, nodata: -1 };
 
 /**
- * 探测站点首页可达性：拿到任何 HTTP 响应（含 403/404/跳转）都算"打得开"，
- * 只有网络级失败/超时才算打不开。用户点推荐卡片跳的是首页，
- * 首页打不开 = 不可用，即使 API /models 还活着也不能上推荐。
+ * 探测站点首页可达性：只有 2xx/3xx（真实页面）才算"打得开"。
+ * 401/403（Cloudflare 拦截/鉴权墙）、404（无落地页）、5xx、网络失败都算打不开——
+ * 用户点推荐卡片看到错误页 = 不可用，即使 API /models 还活着也不能上推荐。
  */
 async function probeWeb(url) {
   const root = (url || "").replace(/\/+$/, "");
@@ -84,10 +84,14 @@ async function probeWeb(url) {
     const res = await fetch(root, {
       signal: ctrl.signal,
       redirect: "follow",
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; SKBuyBot/1.0)" },
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+      },
     });
     clearTimeout(timer);
-    return { webAlive: res.status > 0 && res.status < 600, webStatus: res.status, webLatencyMs: Date.now() - started };
+    return { webAlive: res.status >= 200 && res.status < 400, webStatus: res.status, webLatencyMs: Date.now() - started };
   } catch {
     return { webAlive: false, webStatus: 0, webLatencyMs: Date.now() - started };
   }
