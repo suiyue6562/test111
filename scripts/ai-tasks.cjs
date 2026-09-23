@@ -179,7 +179,7 @@ async function summarizePlatforms(pool, limit = 150) {
   const [plats] = await pool.query(
     `SELECT p.id, p.name, p.url, p.description, p.aiTags,
        (SELECT COUNT(DISTINCT model) FROM platform_prices WHERE platformId = p.id) AS models,
-       (SELECT MIN(ratio) FROM platform_prices WHERE platformId = p.id AND ratio > 0) AS minRatio,
+       (SELECT MIN(ratio) FROM platform_prices WHERE platformId = p.id AND ratio BETWEEN 0.1 AND 20) AS minRatio,
        (SELECT COUNT(DISTINCT groupName) FROM platform_prices WHERE platformId = p.id) AS \`groups\`,
        (SELECT COUNT(DISTINCT vendor) FROM platform_prices WHERE platformId = p.id) AS vendors
      FROM platforms p
@@ -368,7 +368,7 @@ async function scorePlatforms(pool, limit = 40) {
   const [plats] = await pool.query(
     `SELECT p.id, p.name, p.apiConfirmed, p.visitCount, p.stage,
        (SELECT COUNT(DISTINCT model) FROM platform_prices WHERE platformId = p.id) AS models,
-       (SELECT MIN(ratio) FROM platform_prices WHERE platformId = p.id AND ratio > 0) AS minRatio,
+       (SELECT MIN(ratio) FROM platform_prices WHERE platformId = p.id AND ratio BETWEEN 0.1 AND 20) AS minRatio,
        (SELECT AVG(rating) FROM reviews WHERE platformId = p.id AND status = 'published') AS avgRating,
        (SELECT COUNT(*) FROM reviews WHERE platformId = p.id AND status = 'published') AS reviewCount
      FROM platforms p
