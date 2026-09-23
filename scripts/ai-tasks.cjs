@@ -2,6 +2,8 @@
  * AI 数据复核与站点简介任务（MiniMax M3）
  * - reviewPriceMutations: 对采集器标记的价格突变做 AI 复核，合理则自动确认，可疑则升级人工
  * - summarizePlatforms: 为缺少简介的站点生成「特点与优点」摘要（依据官网首页文本+价格数据）
+ * - inferSiteNames: 对站名拉取失败（name=domain）的站点，AI 依据域名+已采数据推断品牌名；
+ *   可信的直接改名，可疑的写入 name_reviews 队列，人工只复核可疑项
  * - aiHealthCheck: 价格数据健康巡检（异常值、归零聚集等），结果写入 collector_runs(type='ai')
  * 调度：collector.cjs 每 12 小时调用一次 runAiTasks（每天 2 次）
  */
@@ -222,6 +224,137 @@ async function summarizePlatforms(pool, limit = 150) {
   return { total: plats.length, done, failed };
 }
 
+/** 抓取官网 <title> 原文（用于品牌名推断），失败返回 null */
+async function fetchHomeTitle(url) {
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; SKBuyBot/1.0)" },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (!m) return null;
+    return m[1].replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim().slice(0, 120);
+  } catch {
+    return null;
+  }
+}
+
+/** 品牌名合法性校验：AI 输出必须过这一层才允许直写 platforms.name */
+function validBrandName(name, domain) {
+  const s = String(name || "").trim();
+  if (s.length < 2 || s.length > 24) return false;
+  if (!/[A-Za-z\u4e00-\u9fff]/.test(s)) return false;
+  if (/\./.test(s)) return false; // 不允许残留域名/后缀形态
+  const flat = s.toLowerCase().replace(/[\s._-]/g, "");
+  const dflat = String(domain).toLowerCase().replace(/^www\./, "").replace(/[\s._-]/g, "");
+  if (flat === dflat) return false; // 完整域名直接当名
+  if (/^(api|www|dev|ai|chat|gpt|llm)$/.test(flat)) return false; // 无意义泛词
+  if (/^(new\s*api|one\s*api|midjourney[- ]?proxy|next[- ]?chat|chatgpt[- ]?next|lobe[- ]?chat|lobechat|fastgpt)$/i.test(s)) return false;
+  return true;
+}
+
+/** AI 品牌名推断：对 name=domain（站名拉取失败）的站点，依据域名+已有信息推断品牌名。
+ *  - 推断可信 → 直接更新 platforms.name
+ *  - 可疑（无法可靠推断/像默认模板/与域名无关联）→ 写入 name_reviews 队列，人工只复核这些
+ *  每次最多处理 limit 个，人工已处理（approved/rejected）的不再重复入队。
+ */
+async function inferSiteNames(pool, limit = 80) {
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS name_reviews (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       platformId INT NOT NULL,
+       domain VARCHAR(255) NOT NULL,
+       aiName VARCHAR(100) NOT NULL,
+       reason VARCHAR(200) DEFAULT '',
+       status ENUM('pending','approved','rejected') DEFAULT 'pending',
+       createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       resolvedAt TIMESTAMP NULL DEFAULT NULL,
+       UNIQUE KEY uniq_platform (platformId)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  );
+  const [plats] = await pool.query(
+    `SELECT p.id, p.name, p.domain, p.url, p.description, p.tags, p.status,
+       (SELECT COUNT(DISTINCT model) FROM platform_prices WHERE platformId = p.id) AS models,
+       (SELECT GROUP_CONCAT(DISTINCT vendor SEPARATOR ',') FROM platform_prices WHERE platformId = p.id AND vendor IS NOT NULL) AS vendors
+     FROM platforms p
+     WHERE p.name = p.domain
+       AND NOT EXISTS (SELECT 1 FROM name_reviews nr WHERE nr.platformId = p.id AND nr.status != 'pending')
+     ORDER BY (p.status = 'operational') DESC, p.visitCount DESC, p.id ASC
+     LIMIT ?`,
+    [limit],
+  );
+  if (plats.length === 0) return { total: 0, applied: 0, queued: 0 };
+
+  // 逐站抓官网 <title>（失败的也有域名与已采数据可用）
+  const facts = [];
+  for (const p of plats) {
+    const title = await fetchHomeTitle(p.url);
+    facts.push({
+      id: Number(p.id), 域名: p.domain,
+      官网标题: title || "（拉取失败）",
+      简介: String(p.description || "").slice(0, 100),
+      供应商: p.vendors ? String(p.vendors).split(",").slice(0, 6).join(",") : "无",
+      模型数: Number(p.models),
+      状态: p.status,
+    });
+  }
+  // 分批调用 AI（每批 ≤20 站，避免大批量输出截断导致 JSON 解析失败）
+  const guesses = [];
+  let parseError = false;
+  const BATCH = 20;
+  for (let i = 0; i < facts.length; i += BATCH) {
+    const chunk = facts.slice(i, i + BATCH);
+    const out = await chat(
+      "你是 API 中转站导航站的编辑，输出必须是 JSON 数组，不要输出其他内容。",
+      `以下站点的品牌名采集全部失败（库中站名=域名），请为每个站点推断用户认知中的品牌显示名。\n` +
+        `规则：\n` +
+        `1. 优先采用官网标题里的真实品牌名（去掉「- 官网」「| 首页」等尾巴）。\n` +
+        `2. 标题是建站模板默认名（New API/One API/LobeChat 等）、纯「首页/官网」类无效词、或拉取失败时，依据域名含义与简介推断；域名本身是可读单词的可用其单词形态（如 coderelay.cn → Coderelay）。\n` +
+        `3. 输出中文或英文品牌名，2-24 字，不要带域名后缀，不要编造与站点无关的名字。\n` +
+        `4. 信息太少无法可靠推断时，name 给最佳猜测并标 "suspect": true；能确定时 "suspect": false。\n` +
+        `5. reason：12 字内说明依据（如「标题含品牌名」「按域名推断」「信息不足」）。\n` +
+        `对每站输出 {"id":数字,"name":"品牌名","suspect":true/false,"reason":"..."}。\n站点：\n${JSON.stringify(chunk)}`,
+      4000,
+    );
+    const part = parseJsonArray(out);
+    if (part) guesses.push(...part);
+    else parseError = true;
+  }
+  if (guesses.length === 0) return { total: plats.length, applied: 0, queued: 0, parseError: true };
+
+  let applied = 0, queued = 0;
+  for (const g of guesses) {
+    const id = Number(g.id);
+    const name = String(g.name || "").trim();
+    if (!id || !name) continue;
+    const p = plats.find((x) => Number(x.id) === id);
+    if (!p) continue;
+    const suspect = Boolean(g.suspect) || !validBrandName(name, p.domain);
+    if (!suspect) {
+      const r = await pool.query(
+        "UPDATE platforms SET name = ?, updatedAt = NOW() WHERE id = ? AND name = domain",
+        [name.slice(0, 60), id],
+      );
+      if (r[0].affectedRows > 0) {
+        applied++;
+        // 之前有 pending 存疑记录的，改名成功后清掉
+        await pool.query("DELETE FROM name_reviews WHERE platformId = ? AND status = 'pending'", [id]);
+      }
+    } else {
+      await pool.query(
+        `INSERT INTO name_reviews (platformId, domain, aiName, reason, status) VALUES (?, ?, ?, ?, 'pending')
+         ON DUPLICATE KEY UPDATE aiName = VALUES(aiName), reason = VALUES(reason), createdAt = NOW()`,
+        [id, p.domain, name.slice(0, 100), String(g.reason || "").slice(0, 80)],
+      );
+      queued++;
+    }
+  }
+  return { total: plats.length, applied, queued, parseError };
+}
+
 /** AI 站点推荐打分：批量评估，写 platforms.score（0-100），排行榜「精选」排序用 */
 async function scorePlatforms(pool, limit = 40) {
   const [plats] = await pool.query(
@@ -372,6 +505,8 @@ async function runAiTasks(pool) {
   if (score) details.push(`打分:${score.done}/${score.total}`);
   const mp = await safe("档案", () => modelProfiles(pool), null);
   if (mp) details.push(`档案:${mp.done}/${mp.total}`);
+  const names = await safe("站名", () => inferSiteNames(pool), null);
+  if (names && names.total > 0) details.push(`站名:推断${names.applied ?? 0}/存疑${names.queued ?? 0}(共${names.total})`);
   const health = await safe("巡检", () => aiHealthCheck(pool), null);
   if (health) details.push(`巡检:总${health.total} 负值${health.negative ?? 0} 极端${health.extreme ?? 0} 超48h${health.stale48h ?? 0} 待复核余${health.pendingReview ?? 0}`);
   await pool.query(
