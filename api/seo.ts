@@ -229,12 +229,13 @@ ${items}
     const sameName = String(p.name).trim().toLowerCase() === String(p.domain).trim().toLowerCase();
     const displayName = sameName ? p.name : `${p.name}（${p.domain}）`;
     // 描述里剔除未被复核的极端倍率宣传（钓饵价/天价），防止快照误导。
-    // 按子句切分，任何含「倍率(达)0.0x」「0.0x 倍」的子句整句丢弃——
-    // 覆盖「最低计费倍率达0.0018」「低至0.025倍」两种语序。
+    // 整条子句（不含句读分隔符，但允许小数点）匹配到「倍率(达)0.0x」「0.0x 倍」即整句删除——
+    // 注意分隔符里不能含英文句点，否则会把「0.0018」从中间劈开导致漏检。
     const rawDesc = String(p.description ?? "")
-      .split(/(?<=[。；，,.!?！？])/)
-      .filter((seg) => !/(倍率\s*达?\s*0\.0\d|0\.0\d+\s*倍)/.test(seg))
-      .join("")
+      .replace(
+        /[^。；，!?！？,]*?(?:倍率\s*达?\s*0\.0\d+|0\.0\d+\s*倍)[^。；，!?！？,]*[。；，!?！？,]?/g,
+        "",
+      )
       .slice(0, 80);
     // 真实最低倍率：只统计 default 组、0.1~20 合理区间（与排行榜口径一致）
     const [minRow] = await db

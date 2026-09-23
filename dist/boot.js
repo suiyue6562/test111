@@ -52763,7 +52763,10 @@ ${items}
     const statusText = p.status === "operational" ? "\u8FD0\u884C\u6B63\u5E38" : p.status === "down" ? "\u5F53\u524D\u4E0D\u53EF\u8FBE" : "\u72B6\u6001\u5F85\u786E\u8BA4";
     const sameName = String(p.name).trim().toLowerCase() === String(p.domain).trim().toLowerCase();
     const displayName = sameName ? p.name : `${p.name}\uFF08${p.domain}\uFF09`;
-    const rawDesc = String(p.description ?? "").split(/(?<=[。；，,.!?！？])/).filter((seg) => !/(倍率\s*达?\s*0\.0\d|0\.0\d+\s*倍)/.test(seg)).join("").slice(0, 80);
+    const rawDesc = String(p.description ?? "").replace(
+      /[^。；，!?！？,]*?(?:倍率\s*达?\s*0\.0\d+|0\.0\d+\s*倍)[^。；，!?！？,]*[。；，!?！？,]?/g,
+      ""
+    ).slice(0, 80);
     const [minRow] = await db.select({ minRatio: sql`MIN(${platformPrices.ratio})` }).from(platformPrices).where(
       and(
         eq(platformPrices.platformId, p.id),
