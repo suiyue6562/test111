@@ -319,8 +319,16 @@ export default function PlatformDetail() {
                             <td className="px-3 py-2 font-semibold text-orange-600 dark:text-orange-400">
                               {Number(pr.ratio) === 0 ? "按次" : `${Number(pr.ratio).toFixed(4)}x`}
                             </td>
-                            <td className="px-3 py-2">￥{Number(pr.shortCost).toFixed(3)}</td>
-                            <td className="px-3 py-2">￥{Number(pr.longCost).toFixed(3)}</td>
+                            <td className="px-3 py-2">
+                              {Number(pr.ratio) === 0 && Number(pr.shortCost) === 0 && Number(pr.longCost) === 0
+                                ? "—"
+                                : `￥${Number(pr.shortCost).toFixed(3)}`}
+                            </td>
+                            <td className="px-3 py-2">
+                              {Number(pr.ratio) === 0 && Number(pr.shortCost) === 0 && Number(pr.longCost) === 0
+                                ? "—"
+                                : `￥${Number(pr.longCost).toFixed(3)}`}
+                            </td>
                             <td className="px-3 py-2 text-xs">
                               {(() => {
                                 const cmp = compare?.[pr.model];

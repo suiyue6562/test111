@@ -509,8 +509,14 @@ async function upsertPrices(pool, platformId, items, truncated = false) {
   );
   const byKey = new Map(existing.map((r) => [`${r.vendor}|${r.model}|${r.groupName}`, r]));
   const seenKeys = new Set();
-  let inserted = 0, updated = 0, flagged = 0;
+  let inserted = 0, updated = 0, flagged = 0, skippedEmpty = 0;
   for (const it of items) {
+    // 无价格信息记录（倍率0=按次 且 短长花费均0）不入库：
+    // 官网未给出任何可换算价格，展示 ￥0.000 会被误读为免费
+    if (Number(it.ratio) === 0 && Number(it.shortCost) === 0 && Number(it.longCost) === 0) {
+      skippedEmpty++;
+      continue;
+    }
     const key = `${it.vendor}|${it.model}|${it.groupName}`;
     seenKeys.add(key);
     const ex = byKey.get(key);
@@ -558,7 +564,7 @@ async function upsertPrices(pool, platformId, items, truncated = false) {
       }
     }
   }
-  return { inserted, updated, flagged, removed };
+  return { inserted, updated, flagged, removed, skippedEmpty };
 }
 
 async function collectAllPrices(pool) {
