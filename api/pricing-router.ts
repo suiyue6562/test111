@@ -260,6 +260,8 @@ export const pricingRouter = createRouter({
       const cost = Number(r.shortCost);
       const v = ratio > 0 ? { e: ratio, isRatio: true } : cost > 0 ? { e: cost, isRatio: false } : null;
       if (!v) continue;
+      // 与排行榜一致的极端倍率过滤：蹭名钓饵价/天价不进最低价榜单
+      if (v.isRatio && (v.e < 0.1 || v.e > 20)) continue;
       const e0 = byLabel.get(c.label) ?? { family: c.family, pm: new Map() };
       const cur = e0.pm.get(r.platformId);
       if (!cur || v.e < cur.e) e0.pm.set(r.platformId, v);

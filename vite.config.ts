@@ -25,7 +25,9 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
+    reportCompressedSize: false, // 关闭 gzip 体积计算，避免低内存环境构建崩溃
     rollupOptions: {
+      maxParallelFileOps: 3, // 限制并行文件加载，降低低内存机器上的构建峰值内存
       output: {
         // 框架与数据层单独分包：内容稳定、可长期缓存，且浏览器可并行下载
         // 注意不用对象语法列出 recharts——对象语法会被当作入口依赖预加载；
