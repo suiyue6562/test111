@@ -18,6 +18,8 @@ import {
   Shield,
   LogOut,
   ChevronDown,
+  Menu,
+  X,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { useAuth } from "@/hooks/useAuth";
@@ -41,15 +43,18 @@ const FORUM_CATS = [
   { slug: "feedback", name: "站务反馈" },
 ];
 
-export default function AppLayout({ children }: { children?: React.ReactNode }) {
-  const { t, lang, setLang, theme, toggleTheme, sidebarCollapsed, setSidebarCollapsed } = useApp();
-  const { user, isAuthenticated, logout } = useAuth();
-  const navigate = useNavigate();
-  const [kw, setKw] = useState("");
+/** 侧栏导航内容（桌面侧栏与手机抽屉共用） */
+function NavBody({
+  collapsed,
+  onNavigate,
+}: {
+  collapsed: boolean;
+  onNavigate?: () => void;
+}) {
+  const { t } = useApp();
   const [forumOpen, setForumOpen] = useState(true);
   const { data: categories } = trpc.forum.categories.useQuery();
   const cats = categories?.length ? categories : FORUM_CATS.map((c, i) => ({ ...c, id: i, description: "", sort: i, postCount: 0 }));
-
   const navItems = [
     { to: "/", icon: LayoutGrid, label: t("home"), end: true },
     { to: "/discover", icon: Compass, label: t("discover") },
@@ -58,6 +63,104 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
     { to: "/skt", icon: KeyRound, label: t("skt") },
     { to: "/skr", icon: Gift, label: t("skr") },
   ];
+  const itemCls = (isActive: boolean) =>
+    `flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors ${
+      isActive
+        ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 font-medium"
+        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+    }`;
+  return (
+    <>
+      <Link to="/" onClick={onNavigate} className="flex items-center gap-2 px-4 h-16 border-b shrink-0">
+        <img src="/logo.png" alt="apibuy.top" className="w-8 h-8 shrink-0" />
+        {!collapsed && (
+          <div className="leading-tight">
+            <div className="font-bold text-sm">
+              api<span className="text-orange-500">buy</span>
+            </div>
+            <div className="text-[10px] text-muted-foreground">帮你选对 API 中转站</div>
+          </div>
+        )}
+      </Link>
+      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
+        {!collapsed && (
+          <div className="px-2 pb-1 text-[10px] font-medium tracking-widest text-muted-foreground">
+            NAVIGATION
+          </div>
+        )}
+        {navItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            onClick={onNavigate}
+            className={({ isActive }) => itemCls(isActive)}
+            title={item.label}
+          >
+            <item.icon className="w-4 h-4 shrink-0" />
+            {!collapsed && <span>{item.label}</span>}
+          </NavLink>
+        ))}
+        {/* 论坛 */}
+        <button
+          onClick={() => setForumOpen(!forumOpen)}
+          className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          title={t("forum")}
+        >
+          <MessagesSquare className="w-4 h-4 shrink-0" />
+          {!collapsed && (
+            <>
+              <span className="flex-1 text-left">{t("forum")}</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${forumOpen ? "" : "-rotate-90"}`} />
+            </>
+          )}
+        </button>
+        {forumOpen && !collapsed && (
+          <div className="ml-5 space-y-0.5 border-l pl-3">
+            <NavLink
+              to="/forum"
+              end
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                `block rounded-md px-2 py-1.5 text-[13px] ${isActive ? "text-orange-600 dark:text-orange-400 font-medium" : "text-muted-foreground hover:text-foreground"}`
+              }
+            >
+              全部帖子
+            </NavLink>
+            {cats.map((c) => (
+              <NavLink
+                key={c.slug}
+                to={`/forum/c/${c.slug}`}
+                onClick={onNavigate}
+                className={({ isActive }) =>
+                  `block rounded-md px-2 py-1.5 text-[13px] ${isActive ? "text-orange-600 dark:text-orange-400 font-medium" : "text-muted-foreground hover:text-foreground"}`
+                }
+              >
+                {c.name}
+              </NavLink>
+            ))}
+          </div>
+        )}
+        <NavLink
+          to="/guide"
+          onClick={onNavigate}
+          className={({ isActive }) => itemCls(isActive)}
+          title={t("guide")}
+        >
+          <BookOpen className="w-4 h-4 shrink-0" />
+          {!collapsed && <span>{t("guide")}</span>}
+        </NavLink>
+      </nav>
+    </>
+  );
+}
+
+export default function AppLayout({ children }: { children?: React.ReactNode }) {
+  const { t, lang, setLang, theme, toggleTheme, sidebarCollapsed, setSidebarCollapsed } = useApp();
+  const { user, isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
+  const [kw, setKw] = useState("");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const doSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,104 +169,13 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
 
   return (
     <div className="min-h-screen bg-background text-foreground flex">
-      {/* 侧边栏 */}
+      {/* 桌面侧边栏（手机隐藏，改用抽屉） */}
       <aside
-        className={`shrink-0 border-r bg-card/60 backdrop-blur flex flex-col transition-all duration-200 sticky top-0 h-screen ${
+        className={`hidden md:flex shrink-0 border-r bg-card/60 backdrop-blur flex-col transition-all duration-200 sticky top-0 h-screen ${
           sidebarCollapsed ? "w-16" : "w-56"
         }`}
       >
-        <Link to="/" className="flex items-center gap-2 px-4 h-16 border-b">
-          <img src="/logo.png" alt="apibuy.top" className="w-8 h-8 shrink-0" />
-          {!sidebarCollapsed && (
-            <div className="leading-tight">
-              <div className="font-bold text-sm">
-                api<span className="text-orange-500">buy</span>
-              </div>
-              <div className="text-[10px] text-muted-foreground">帮你选对 API 中转站</div>
-            </div>
-          )}
-        </Link>
-
-        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
-          {!sidebarCollapsed && (
-            <div className="px-2 pb-1 text-[10px] font-medium tracking-widest text-muted-foreground">
-              NAVIGATION
-            </div>
-          )}
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                `flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors ${
-                  isActive
-                    ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 font-medium"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`
-              }
-              title={item.label}
-            >
-              <item.icon className="w-4 h-4 shrink-0" />
-              {!sidebarCollapsed && <span>{item.label}</span>}
-            </NavLink>
-          ))}
-
-          {/* 论坛 */}
-          <button
-            onClick={() => setForumOpen(!forumOpen)}
-            className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-            title={t("forum")}
-          >
-            <MessagesSquare className="w-4 h-4 shrink-0" />
-            {!sidebarCollapsed && (
-              <>
-                <span className="flex-1 text-left">{t("forum")}</span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${forumOpen ? "" : "-rotate-90"}`} />
-              </>
-            )}
-          </button>
-          {forumOpen && !sidebarCollapsed && (
-            <div className="ml-5 space-y-0.5 border-l pl-3">
-              <NavLink
-                to="/forum"
-                end
-                className={({ isActive }) =>
-                  `block rounded-md px-2 py-1.5 text-[13px] ${isActive ? "text-orange-600 dark:text-orange-400 font-medium" : "text-muted-foreground hover:text-foreground"}`
-                }
-              >
-                全部帖子
-              </NavLink>
-              {cats.map((c) => (
-                <NavLink
-                  key={c.slug}
-                  to={`/forum/c/${c.slug}`}
-                  className={({ isActive }) =>
-                    `block rounded-md px-2 py-1.5 text-[13px] ${isActive ? "text-orange-600 dark:text-orange-400 font-medium" : "text-muted-foreground hover:text-foreground"}`
-                  }
-                >
-                  {c.name}
-                </NavLink>
-              ))}
-            </div>
-          )}
-
-          <NavLink
-            to="/guide"
-            className={({ isActive }) =>
-              `flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm ${
-                isActive
-                  ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 font-medium"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`
-            }
-            title={t("guide")}
-          >
-            <BookOpen className="w-4 h-4 shrink-0" />
-            {!sidebarCollapsed && <span>{t("guide")}</span>}
-          </NavLink>
-        </nav>
-
+        <NavBody collapsed={sidebarCollapsed} />
         <div className="p-2 border-t">
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -181,9 +193,37 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
         </div>
       </aside>
 
+      {/* 手机抽屉导航 */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-40 md:hidden">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNavOpen(false)} />
+          <div className="absolute left-0 top-0 h-full w-64 bg-card border-r flex flex-col shadow-xl">
+            <button
+              className="absolute top-4 right-3 text-muted-foreground hover:text-foreground z-10"
+              onClick={() => setMobileNavOpen(false)}
+              aria-label="关闭菜单"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <NavBody collapsed={false} onNavigate={() => setMobileNavOpen(false)} />
+          </div>
+        </div>
+      )}
+
       {/* 主区域 */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-16 border-b bg-card/60 backdrop-blur sticky top-0 z-20 flex items-center gap-3 px-4">
+          {/* 手机端：汉堡菜单 + 词标 */}
+          <button
+            className="md:hidden -ml-1 p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="打开菜单"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <Link to="/" className="md:hidden font-bold text-sm shrink-0">
+            api<span className="text-orange-500">buy</span>
+          </Link>
           <div className="hidden md:block">
             <div className="text-[10px] tracking-widest text-muted-foreground font-medium">APIBUY.TOP</div>
             <div className="text-sm font-semibold">选品推荐，一站掌握</div>
@@ -201,7 +241,7 @@ export default function AppLayout({ children }: { children?: React.ReactNode }) 
           <Button
             variant="outline"
             size="icon"
-            className="rounded-full"
+            className="rounded-full hidden sm:inline-flex"
             onClick={() => setLang(lang === "zh" ? "en" : "zh")}
             title="Language"
           >
