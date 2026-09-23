@@ -50539,15 +50539,15 @@ async function withStats(db, rows) {
   const modelCount = new Map(modelRows.map((r) => [r.platformId, Number(r.n)]));
   const priceRows = ids.length ? await db.execute(sql`
         SELECT platformId,
-          MIN(CASE WHEN ratio > 0 AND (LOWER(model) LIKE 'gpt-5%' OR LOWER(model) LIKE '%/gpt-5%') THEN ratio END) AS gpt5,
-          MIN(CASE WHEN ratio > 0 AND (LOWER(model) LIKE 'gpt-4o%' OR LOWER(model) LIKE '%/gpt-4o%') THEN ratio END) AS gpt4o,
-          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE '%sonnet%' THEN ratio END) AS claude,
-          MIN(CASE WHEN ratio > 0 AND (LOWER(model) LIKE 'gemini%pro%' OR LOWER(model) LIKE '%/gemini%pro%') THEN ratio END) AS gemini,
-          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE '%deepseek%' THEN ratio END) AS deepseek,
-          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE '%kimi%' THEN ratio END) AS kimi,
-          MIN(CASE WHEN ratio > 0 AND (LOWER(model) LIKE 'glm%' OR LOWER(model) LIKE '%/glm%') THEN ratio END) AS glm,
-          MIN(CASE WHEN ratio > 0 AND LOWER(model) LIKE '%qwen%' THEN ratio END) AS qwen,
-          MIN(CASE WHEN ratio > 0 THEN ratio END) AS minRatio
+          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND (LOWER(model) LIKE 'gpt-5%' OR LOWER(model) LIKE '%/gpt-5%') THEN ratio END) AS gpt5,
+          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND (LOWER(model) LIKE 'gpt-4o%' OR LOWER(model) LIKE '%/gpt-4o%') THEN ratio END) AS gpt4o,
+          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND LOWER(model) LIKE '%sonnet%' THEN ratio END) AS claude,
+          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND (LOWER(model) LIKE 'gemini%pro%' OR LOWER(model) LIKE '%/gemini%pro%') THEN ratio END) AS gemini,
+          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND LOWER(model) LIKE '%deepseek%' THEN ratio END) AS deepseek,
+          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND LOWER(model) LIKE '%kimi%' THEN ratio END) AS kimi,
+          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND (LOWER(model) LIKE 'glm%' OR LOWER(model) LIKE '%/glm%') THEN ratio END) AS glm,
+          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 AND LOWER(model) LIKE '%qwen%' THEN ratio END) AS qwen,
+          MIN(CASE WHEN ratio BETWEEN 0.1 AND 20 THEN ratio END) AS minRatio
         FROM platform_prices
         WHERE platformId IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)}) AND needReview = 0
         GROUP BY platformId
@@ -51167,6 +51167,7 @@ var pricingRouter = createRouter({
       const cost = Number(r.shortCost);
       const v = ratio > 0 ? { e: ratio, isRatio: true } : cost > 0 ? { e: cost, isRatio: false } : null;
       if (!v) continue;
+      if (v.isRatio && (v.e < 0.1 || v.e > 20)) continue;
       const e0 = byLabel.get(c.label) ?? { family: c.family, pm: /* @__PURE__ */ new Map() };
       const cur = e0.pm.get(r.platformId);
       if (!cur || v.e < cur.e) e0.pm.set(r.platformId, v);
@@ -52589,17 +52590,36 @@ async function createContext(opts) {
 
 // api/seo.ts
 var SITE = "https://apibuy.top";
-var BRAND = "API \u89C2\u5BDF\u8005";
-var SLOGAN = "\u627E API \u4E2D\u8F6C\u7AD9\uFF0C\u5148\u770B API \u89C2\u5BDF\u8005\u3002";
+var BRAND = "apibuy.top";
+var SLOGAN = "\u9009 API \u4E2D\u8F6C\u7AD9\uFF0C\u4E0A apibuy.top\u3002";
+var OG_IMAGE = `${SITE}/logo.png`;
+var BAIDU_VERIFY = process.env.BAIDU_VERIFY_TOKEN || "";
 var BOT_RE = /Baiduspider|Googlebot|bingbot|360Spider|Sogou|YisouSpider|Bytespider|PetalBot|DuckDuckBot|Slurp|facebookexternalhit|Twitterbot|LinkedInBot/i;
 var esc2 = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function htmlPage(p) {
   const canonical = `${SITE}${p.path}`;
+  const ld = [
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: BRAND,
+      url: SITE,
+      description: SLOGAN,
+      inLanguage: "zh-CN"
+    },
+    ...p.jsonLd ?? []
+  ];
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="applicable-device" content="pc,mobile" />
+<meta name="MobileOptimized" content="width" />
+<meta name="format-detection" content="telephone=no" />
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+${BAIDU_VERIFY ? `<meta name="baidu-site-verification" content="${esc2(BAIDU_VERIFY)}" />` : ""}
 <title>${esc2(p.title)}</title>
 <meta name="description" content="${esc2(p.desc)}" />
 ${p.keywords ? `<meta name="keywords" content="${esc2(p.keywords)}" />` : ""}
@@ -52609,7 +52629,9 @@ ${p.keywords ? `<meta name="keywords" content="${esc2(p.keywords)}" />` : ""}
 <meta property="og:title" content="${esc2(p.title)}" />
 <meta property="og:description" content="${esc2(p.desc)}" />
 <meta property="og:url" content="${esc2(canonical)}" />
+<meta property="og:image" content="${OG_IMAGE}" />
 <meta name="robots" content="index,follow" />
+<script type="application/ld+json">${JSON.stringify(ld)}</script>
 </head>
 <body>
 ${p.body}
@@ -52656,6 +52678,9 @@ Sitemap: ${SITE}/sitemap.xml
       { path: "/forum", priority: "0.7", changefreq: "hourly" },
       { path: "/guide", priority: "0.6", changefreq: "weekly" },
       { path: "/sks", priority: "0.6", changefreq: "weekly" },
+      { path: "/skt", priority: "0.6", changefreq: "weekly" },
+      { path: "/skr", priority: "0.6", changefreq: "weekly" },
+      { path: "/compare", priority: "0.7", changefreq: "daily" },
       { path: "/about", priority: "0.5", changefreq: "monthly" },
       { path: "/advertise", priority: "0.5", changefreq: "monthly" }
     ];
@@ -52690,7 +52715,7 @@ ${urls.join("\n")}
       domain: platforms.domain,
       score: platforms.score,
       status: platforms.status
-    }).from(platforms).where(and(ne(platforms.status, "down"), ne(platforms.status, "closed"))).orderBy(desc(platforms.score)).limit(80);
+    }).from(platforms).where(and(ne(platforms.status, "down"), ne(platforms.status, "closed"), ne(platforms.status, "unknown"))).orderBy(desc(platforms.score)).limit(80);
     const items = top.map(
       (p) => `<li><a href="${SITE}/site/${encodeURIComponent(p.domain)}">${esc2(p.name)}</a>\uFF08${esc2(p.domain)}\uFF0C\u8BC4\u5206 ${esc2(Number(p.score).toFixed(1))}\uFF09</li>`
     ).join("\n");
@@ -52698,18 +52723,32 @@ ${urls.join("\n")}
     const totalCount = Number(cnt[0]?.n ?? 0);
     return c.html(
       htmlPage({
-        title: `${BRAND} - ${SLOGAN}`,
-        desc: `${SLOGAN}${BRAND}\u6301\u7EED\u5B9E\u6D4B ${totalCount} \u5BB6 API \u4E2D\u8F6C\u7AD9\u7684\u7A33\u5B9A\u6027\u3001\u901F\u5EA6\u3001\u4EF7\u683C\u4E0E\u53E3\u7891\uFF0CAI \u6253\u5206\u6A2A\u5411\u5BF9\u6BD4\uFF0C\u5E2E\u4F60\u627E\u5230\u6700\u9760\u8C31\u7684 API \u4E2D\u8F6C\u7AD9\u3002`,
-        keywords: "API\u4E2D\u8F6C\u7AD9,API\u4E2D\u8F6C,API\u8F6C\u53D1,\u4E2D\u8F6C\u7AD9\u8BC4\u6D4B,API\u4E2D\u8F6C\u7AD9\u63A8\u8350,API\u4E2D\u8F6C\u7AD9\u6392\u884C\u699C, Claude API\u4E2D\u8F6C, GPT API\u4E2D\u8F6C",
+        title: `API\u4E2D\u8F6C\u7AD9\u63A8\u8350_\u4EF7\u683C\u5BF9\u6BD4_\u5B9E\u6D4B\u6392\u884C\u699C - ${BRAND}`,
+        desc: `${SLOGAN}\u6301\u7EED\u5B9E\u6D4B ${totalCount} \u5BB6 API \u4E2D\u8F6C\u7AD9\u7684\u7A33\u5B9A\u6027\u3001\u901F\u5EA6\u3001\u4EF7\u683C\u4E0E\u53E3\u7891\uFF0CAI \u6253\u5206\u6A2A\u5411\u5BF9\u6BD4 GPT/Claude/Gemini \u7B49\u6A21\u578B\u4EF7\u683C\uFF0C\u5E2E\u4F60\u627E\u5230\u6700\u9760\u8C31\u7684 API \u4E2D\u8F6C\u7AD9\u3002`,
+        keywords: "API\u4E2D\u8F6C\u7AD9,API\u4E2D\u8F6C\u7AD9\u63A8\u8350,API\u4E2D\u8F6C\u7AD9\u6392\u884C\u699C,API\u4E2D\u8F6C,\u4E2D\u8F6C\u7AD9\u8BC4\u6D4B,\u4E2D\u8F6C\u7AD9\u4EF7\u683C\u5BF9\u6BD4,Claude API\u4E2D\u8F6C,GPT API\u4E2D\u8F6C",
         path: "/",
-        body: `${header("/", `${BRAND} - API \u4E2D\u8F6C\u7AD9\u8BC4\u6D4B\u4E0E\u63A8\u8350\u5E73\u53F0`, SLOGAN)}
+        jsonLd: [
+          {
+            "@context": "https://schema.org",
+            "@type": "ItemList",
+            name: "\u4F18\u8D28 API \u4E2D\u8F6C\u7AD9\u63A8\u8350",
+            numberOfItems: top.length,
+            itemListElement: top.slice(0, 30).map((p, i) => ({
+              "@type": "ListItem",
+              position: i + 1,
+              name: p.name,
+              url: `${SITE}/site/${encodeURIComponent(p.domain)}`
+            }))
+          }
+        ],
+        body: `${header("/", `API \u4E2D\u8F6C\u7AD9\u8BC4\u6D4B\u4E0E\u63A8\u8350\u5E73\u53F0 - ${BRAND}`, SLOGAN)}
 <main>
 <p>${esc2(SLOGAN)} \u6211\u4EEC\u6301\u7EED\u89C2\u5BDF\u6BCF\u4E00\u5BB6 API \u4E2D\u8F6C\u7AD9\uFF1A\u54EA\u5BB6\u6700\u8FD1\u6389\u7EBF\u4E86\u3001\u54EA\u5BB6\u6DA8\u4EF7\u4E86\u3001\u54EA\u5BB6\u65B0\u4E0A\u4E86\u529F\u80FD\uFF0C\u4E00\u9879\u4E00\u9879\u5E2E\u4F60\u76EF\u7D27\u3002\u4E0D\u5439\u4E0D\u9ED1\uFF0C\u53EA\u8BF4\u771F\u8BDD\u3002</p>
 <h2>\u4F18\u8D28 API \u4E2D\u8F6C\u7AD9\u63A8\u8350\uFF08AI \u5B9E\u6D4B\u8BC4\u5206\u6392\u5E8F\uFF09</h2>
 <ul>
 ${items}
 </ul>
-<p>\u67E5\u770B\u5B8C\u6574\u699C\u5355\u4E0E\u4EF7\u683C\u5BF9\u6BD4\u8BF7\u8BBF\u95EE <a href="${SITE}/leaderboard">${SITE}/leaderboard</a></p>
+<p>\u67E5\u770B\u5B8C\u6574\u699C\u5355\u4E0E\u4EF7\u683C\u5BF9\u6BD4\u8BF7\u8BBF\u95EE <a href="${SITE}/leaderboard">API \u4E2D\u8F6C\u7AD9\u6392\u884C\u699C</a> \u4E0E <a href="${SITE}/pricing">\u4EF7\u683C\u5BF9\u6BD4</a>\u3002</p>
 </main>`
       })
     );
@@ -52722,18 +52761,41 @@ ${items}
     if (!p) return await next();
     const tags = (p.aiTags ?? []).join("\u3001");
     const statusText = p.status === "operational" ? "\u8FD0\u884C\u6B63\u5E38" : p.status === "down" ? "\u5F53\u524D\u4E0D\u53EF\u8FBE" : "\u72B6\u6001\u5F85\u786E\u8BA4";
-    const desc2 = `${p.name}\uFF08${p.domain}\uFF09\u662F\u4E00\u5BB6 API \u4E2D\u8F6C\u7AD9\uFF0C\u5F53\u524D\u72B6\u6001\uFF1A${statusText}\uFF0CAI \u7EFC\u5408\u8BC4\u5206 ${Number(p.score).toFixed(1)}\u3002${p.description ? String(p.description).slice(0, 80) : ""} \u5728${BRAND}\u67E5\u770B${p.name}\u7684\u5B9E\u65F6\u4EF7\u683C\u3001\u7A33\u5B9A\u6027\u8BB0\u5F55\u4E0E\u7528\u6237\u8BC4\u4EF7\u3002`;
+    const sameName = String(p.name).trim().toLowerCase() === String(p.domain).trim().toLowerCase();
+    const displayName = sameName ? p.name : `${p.name}\uFF08${p.domain}\uFF09`;
+    const rawDesc = String(p.description ?? "").replace(/[^。；，,.]*?0\.0\d+\s*倍[^。；，,.]*/g, "").slice(0, 80);
+    const [minRow] = await db.select({ minRatio: sql`MIN(${platformPrices.ratio})` }).from(platformPrices).where(
+      and(
+        eq(platformPrices.platformId, p.id),
+        eq(platformPrices.groupName, "default"),
+        sql`${platformPrices.ratio} BETWEEN 0.1 AND 20`
+      )
+    ).limit(1);
+    const minRatio = minRow?.minRatio != null ? Number(minRow.minRatio) : null;
+    const pricePart = minRatio != null ? `\u6700\u4F4E\u8BA1\u8D39\u500D\u7387 ${minRatio.toFixed(minRatio < 1 ? 2 : 1)} \u500D\u3002` : "";
+    const desc2 = `${displayName}\u662F\u4E00\u5BB6 API \u4E2D\u8F6C\u7AD9\uFF0C\u5F53\u524D\u72B6\u6001\uFF1A${statusText}\uFF0CAI \u7EFC\u5408\u8BC4\u5206 ${Number(p.score).toFixed(1)}\u3002${pricePart}${rawDesc} \u5728${BRAND}\u67E5\u770B${p.name}\u7684\u5B9E\u65F6\u4EF7\u683C\u3001\u7A33\u5B9A\u6027\u8BB0\u5F55\u4E0E\u7528\u6237\u8BC4\u4EF7\u3002`;
     return c.html(
       htmlPage({
-        title: `${p.name} \u8BC4\u6D4B - \u4EF7\u683C\u3001\u7A33\u5B9A\u6027\u4E0E\u7528\u6237\u53E3\u7891 | ${BRAND}`,
+        title: `${p.name} \u600E\u4E48\u6837_\u4EF7\u683C_\u7A33\u5B9A\u6027\u5B9E\u6D4B - API\u4E2D\u8F6C\u7AD9\u8BC4\u6D4B | ${BRAND}`,
         desc: desc2,
         keywords: `${p.name},${p.domain},API\u4E2D\u8F6C\u7AD9,${tags}`,
         path: `/site/${domain2}`,
-        body: `${header(`/site/${domain2}`, `${p.name}\uFF08${p.domain}\uFF09\u4E2D\u8F6C\u7AD9\u8BC4\u6D4B`, statusText)}
+        jsonLd: [
+          {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            itemListElement: [
+              { "@type": "ListItem", position: 1, name: "\u9996\u9875", item: SITE },
+              { "@type": "ListItem", position: 2, name: "\u6536\u5F55\u96F7\u8FBE", item: `${SITE}/discover` },
+              { "@type": "ListItem", position: 3, name: p.name, item: `${SITE}/site/${encodeURIComponent(domain2)}` }
+            ]
+          }
+        ],
+        body: `${header(`/site/${domain2}`, `${displayName}\u4E2D\u8F6C\u7AD9\u8BC4\u6D4B`, statusText)}
 <main>
 <p>\u5B98\u7F51\uFF1A<a href="${esc2(p.url)}" rel="nofollow">${esc2(p.url)}</a></p>
 <p>AI \u7EFC\u5408\u8BC4\u5206\uFF1A<strong>${esc2(Number(p.score).toFixed(1))}</strong> \uFF5C \u72B6\u6001\uFF1A${esc2(statusText)} \uFF5C \u6536\u5F55\u7F16\u53F7\uFF1A${p.id}</p>
-${p.description ? `<p>${esc2(p.description)}</p>` : ""}
+${rawDesc ? `<p>${esc2(rawDesc)}</p>` : ""}
 ${tags ? `<p>\u670D\u52A1\u4EAE\u70B9\uFF1A${esc2(tags)}</p>` : ""}
 <p>\u67E5\u770B <a href="${SITE}/site/${encodeURIComponent(domain2)}">\u5B8C\u6574\u4EF7\u683C\u8868\u4E0E\u53EF\u7528\u7387\u66F2\u7EBF</a>\uFF0C\u6216\u4E0E<a href="${SITE}/">\u5176\u4ED6\u4E2D\u8F6C\u7AD9\u6A2A\u5411\u5BF9\u6BD4</a>\u3002</p>
 </main>`

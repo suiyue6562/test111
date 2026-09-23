@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import type { HttpBindings } from "@hono/node-server";
 import { desc, eq, ne, and, sql } from "drizzle-orm";
-import { platforms } from "@db/schema";
+import { platforms, platformPrices } from "@db/schema";
 import { getDb } from "./queries/connection";
 
 /**
@@ -13,8 +13,11 @@ import { getDb } from "./queries/connection";
  */
 
 const SITE = "https://apibuy.top";
-const BRAND = "API 观察者";
-const SLOGAN = "找 API 中转站，先看 API 观察者。";
+const BRAND = "apibuy.top";
+const SLOGAN = "选 API 中转站，上 apibuy.top。";
+const OG_IMAGE = `${SITE}/logo.png`;
+// 百度站长平台验证 token：在 ziyuan.baidu.com 添加站点后把 meta 验证码配到服务器环境变量即可生效
+const BAIDU_VERIFY = process.env.BAIDU_VERIFY_TOKEN || "";
 
 const BOT_RE =
   /Baiduspider|Googlebot|bingbot|360Spider|Sogou|YisouSpider|Bytespider|PetalBot|DuckDuckBot|Slurp|facebookexternalhit|Twitterbot|LinkedInBot/i;
@@ -34,13 +37,31 @@ function htmlPage(p: {
   keywords?: string;
   path: string;
   body: string;
+  jsonLd?: Record<string, unknown>[];
 }) {
   const canonical = `${SITE}${p.path}`;
+  const ld = [
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: BRAND,
+      url: SITE,
+      description: SLOGAN,
+      inLanguage: "zh-CN",
+    },
+    ...(p.jsonLd ?? []),
+  ];
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="applicable-device" content="pc,mobile" />
+<meta name="MobileOptimized" content="width" />
+<meta name="format-detection" content="telephone=no" />
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+${BAIDU_VERIFY ? `<meta name="baidu-site-verification" content="${esc(BAIDU_VERIFY)}" />` : ""}
 <title>${esc(p.title)}</title>
 <meta name="description" content="${esc(p.desc)}" />
 ${p.keywords ? `<meta name="keywords" content="${esc(p.keywords)}" />` : ""}
@@ -50,7 +71,9 @@ ${p.keywords ? `<meta name="keywords" content="${esc(p.keywords)}" />` : ""}
 <meta property="og:title" content="${esc(p.title)}" />
 <meta property="og:description" content="${esc(p.desc)}" />
 <meta property="og:url" content="${esc(canonical)}" />
+<meta property="og:image" content="${OG_IMAGE}" />
 <meta name="robots" content="index,follow" />
+<script type="application/ld+json">${JSON.stringify(ld)}</script>
 </head>
 <body>
 ${p.body}
@@ -99,6 +122,9 @@ export function registerSeo(app: App) {
       { path: "/forum", priority: "0.7", changefreq: "hourly" },
       { path: "/guide", priority: "0.6", changefreq: "weekly" },
       { path: "/sks", priority: "0.6", changefreq: "weekly" },
+      { path: "/skt", priority: "0.6", changefreq: "weekly" },
+      { path: "/skr", priority: "0.6", changefreq: "weekly" },
+      { path: "/compare", priority: "0.7", changefreq: "daily" },
       { path: "/about", priority: "0.5", changefreq: "monthly" },
       { path: "/advertise", priority: "0.5", changefreq: "monthly" },
     ];
@@ -142,7 +168,8 @@ ${urls.join("\n")}
         status: platforms.status,
       })
       .from(platforms)
-      .where(and(ne(platforms.status, "down"), ne(platforms.status, "closed")))
+      // 与推荐位口径一致：down/closed/unknown（API 未确认）都不进蜘蛛快照
+      .where(and(ne(platforms.status, "down"), ne(platforms.status, "closed"), ne(platforms.status, "unknown")))
       .orderBy(desc(platforms.score))
       .limit(80);
     const items = top
@@ -158,18 +185,32 @@ ${urls.join("\n")}
     const totalCount = Number(cnt[0]?.n ?? 0);
     return c.html(
       htmlPage({
-        title: `${BRAND} - ${SLOGAN}`,
-        desc: `${SLOGAN}${BRAND}持续实测 ${totalCount} 家 API 中转站的稳定性、速度、价格与口碑，AI 打分横向对比，帮你找到最靠谱的 API 中转站。`,
-        keywords: "API中转站,API中转,API转发,中转站评测,API中转站推荐,API中转站排行榜, Claude API中转, GPT API中转",
+        title: `API中转站推荐_价格对比_实测排行榜 - ${BRAND}`,
+        desc: `${SLOGAN}持续实测 ${totalCount} 家 API 中转站的稳定性、速度、价格与口碑，AI 打分横向对比 GPT/Claude/Gemini 等模型价格，帮你找到最靠谱的 API 中转站。`,
+        keywords: "API中转站,API中转站推荐,API中转站排行榜,API中转,中转站评测,中转站价格对比,Claude API中转,GPT API中转",
         path: "/",
-        body: `${header("/", `${BRAND} - API 中转站评测与推荐平台`, SLOGAN)}
+        jsonLd: [
+          {
+            "@context": "https://schema.org",
+            "@type": "ItemList",
+            name: "优质 API 中转站推荐",
+            numberOfItems: top.length,
+            itemListElement: top.slice(0, 30).map((p, i) => ({
+              "@type": "ListItem",
+              position: i + 1,
+              name: p.name,
+              url: `${SITE}/site/${encodeURIComponent(p.domain)}`,
+            })),
+          },
+        ],
+        body: `${header("/", `API 中转站评测与推荐平台 - ${BRAND}`, SLOGAN)}
 <main>
 <p>${esc(SLOGAN)} 我们持续观察每一家 API 中转站：哪家最近掉线了、哪家涨价了、哪家新上了功能，一项一项帮你盯紧。不吹不黑，只说真话。</p>
 <h2>优质 API 中转站推荐（AI 实测评分排序）</h2>
 <ul>
 ${items}
 </ul>
-<p>查看完整榜单与价格对比请访问 <a href="${SITE}/leaderboard">${SITE}/leaderboard</a></p>
+<p>查看完整榜单与价格对比请访问 <a href="${SITE}/leaderboard">API 中转站排行榜</a> 与 <a href="${SITE}/pricing">价格对比</a>。</p>
 </main>`,
       }),
     );
@@ -184,18 +225,51 @@ ${items}
     const tags = ((p.aiTags as string[] | null) ?? []).join("、");
     const statusText =
       p.status === "operational" ? "运行正常" : p.status === "down" ? "当前不可达" : "状态待确认";
-    const desc = `${p.name}（${p.domain}）是一家 API 中转站，当前状态：${statusText}，AI 综合评分 ${Number(p.score).toFixed(1)}。${p.description ? String(p.description).slice(0, 80) : ""} 在${BRAND}查看${p.name}的实时价格、稳定性记录与用户评价。`;
+    // 名称与域名相同时不重复展示（避免「laysoai.com（laysoai.com）」）
+    const sameName = String(p.name).trim().toLowerCase() === String(p.domain).trim().toLowerCase();
+    const displayName = sameName ? p.name : `${p.name}（${p.domain}）`;
+    // 描述里剔除未被复核的极端倍率宣传（钓饵价/天价），防止快照误导
+    const rawDesc = String(p.description ?? "")
+      .replace(/[^。；，,.]*?0\.0\d+\s*倍[^。；，,.]*/g, "")
+      .slice(0, 80);
+    // 真实最低倍率：只统计 default 组、0.1~20 合理区间（与排行榜口径一致）
+    const [minRow] = await db
+      .select({ minRatio: sql<string | null>`MIN(${platformPrices.ratio})` })
+      .from(platformPrices)
+      .where(
+        and(
+          eq(platformPrices.platformId, p.id),
+          eq(platformPrices.groupName, "default"),
+          sql`${platformPrices.ratio} BETWEEN 0.1 AND 20`,
+        ),
+      )
+      .limit(1);
+    const minRatio = minRow?.minRatio != null ? Number(minRow.minRatio) : null;
+    const pricePart =
+      minRatio != null ? `最低计费倍率 ${minRatio.toFixed(minRatio < 1 ? 2 : 1)} 倍。` : "";
+    const desc = `${displayName}是一家 API 中转站，当前状态：${statusText}，AI 综合评分 ${Number(p.score).toFixed(1)}。${pricePart}${rawDesc} 在${BRAND}查看${p.name}的实时价格、稳定性记录与用户评价。`;
     return c.html(
       htmlPage({
-        title: `${p.name} 评测 - 价格、稳定性与用户口碑 | ${BRAND}`,
+        title: `${p.name} 怎么样_价格_稳定性实测 - API中转站评测 | ${BRAND}`,
         desc,
         keywords: `${p.name},${p.domain},API中转站,${tags}`,
         path: `/site/${domain}`,
-        body: `${header(`/site/${domain}`, `${p.name}（${p.domain}）中转站评测`, statusText)}
+        jsonLd: [
+          {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            itemListElement: [
+              { "@type": "ListItem", position: 1, name: "首页", item: SITE },
+              { "@type": "ListItem", position: 2, name: "收录雷达", item: `${SITE}/discover` },
+              { "@type": "ListItem", position: 3, name: p.name, item: `${SITE}/site/${encodeURIComponent(domain)}` },
+            ],
+          },
+        ],
+        body: `${header(`/site/${domain}`, `${displayName}中转站评测`, statusText)}
 <main>
 <p>官网：<a href="${esc(p.url)}" rel="nofollow">${esc(p.url)}</a></p>
 <p>AI 综合评分：<strong>${esc(Number(p.score).toFixed(1))}</strong> ｜ 状态：${esc(statusText)} ｜ 收录编号：${p.id}</p>
-${p.description ? `<p>${esc(p.description)}</p>` : ""}
+${rawDesc ? `<p>${esc(rawDesc)}</p>` : ""}
 ${tags ? `<p>服务亮点：${esc(tags)}</p>` : ""}
 <p>查看 <a href="${SITE}/site/${encodeURIComponent(domain)}">完整价格表与可用率曲线</a>，或与<a href="${SITE}/">其他中转站横向对比</a>。</p>
 </main>`,
