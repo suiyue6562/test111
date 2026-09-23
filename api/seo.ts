@@ -228,9 +228,13 @@ ${items}
     // 名称与域名相同时不重复展示（避免「laysoai.com（laysoai.com）」）
     const sameName = String(p.name).trim().toLowerCase() === String(p.domain).trim().toLowerCase();
     const displayName = sameName ? p.name : `${p.name}（${p.domain}）`;
-    // 描述里剔除未被复核的极端倍率宣传（钓饵价/天价），防止快照误导
+    // 描述里剔除未被复核的极端倍率宣传（钓饵价/天价），防止快照误导。
+    // 按子句切分，任何含「倍率(达)0.0x」「0.0x 倍」的子句整句丢弃——
+    // 覆盖「最低计费倍率达0.0018」「低至0.025倍」两种语序。
     const rawDesc = String(p.description ?? "")
-      .replace(/[^。；，,.]*?0\.0\d+\s*倍[^。；，,.]*/g, "")
+      .split(/(?<=[。；，,.!?！？])/)
+      .filter((seg) => !/(倍率\s*达?\s*0\.0\d|0\.0\d+\s*倍)/.test(seg))
+      .join("")
       .slice(0, 80);
     // 真实最低倍率：只统计 default 组、0.1~20 合理区间（与排行榜口径一致）
     const [minRow] = await db
