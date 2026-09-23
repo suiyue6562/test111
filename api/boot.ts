@@ -7,8 +7,11 @@ import { createContext } from "./context";
 import { env } from "./lib/env";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { Paths } from "@contracts/constants";
+import { registerSeo } from "./seo";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
+
+registerSeo(app);
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 app.get(Paths.oauthCallback, createOAuthCallbackHandler());

@@ -17841,10 +17841,10 @@ var require_prepare = __commonJS({
         return _Prepare.prototype.prepareHeader;
       }
       prepareHeader(packet, connection) {
-        const header = new Packets.PreparedStatementHeader(packet);
-        this.id = header.id;
-        this.fieldCount = header.fieldCount;
-        this.parameterCount = header.parameterCount;
+        const header2 = new Packets.PreparedStatementHeader(packet);
+        this.id = header2.id;
+        this.fieldCount = header2.fieldCount;
+        this.parameterCount = header2.parameterCount;
         if (this.parameterCount > 0) {
           return _Prepare.prototype.readParameter;
         }
@@ -18126,8 +18126,8 @@ var require_binlog_dump2 = __commonJS({
           return null;
         }
         packet.readInt8();
-        const header = new BinlogEventHeader(packet);
-        const EventParser = eventParsers[header.eventType];
+        const header2 = new BinlogEventHeader(packet);
+        const EventParser = eventParsers[header2.eventType];
         let event;
         if (EventParser) {
           event = new EventParser(packet);
@@ -18136,7 +18136,7 @@ var require_binlog_dump2 = __commonJS({
             name: "UNKNOWN"
           };
         }
-        event.header = header;
+        event.header = header2;
         this.emit("event", event);
         return _BinlogDump.prototype.binlogData;
       }
@@ -18913,7 +18913,7 @@ var require_connection = __commonJS({
       writePacket(packet) {
         const MAX_PACKET_LENGTH = 16777215;
         const length = packet.length();
-        let chunk, offset, header;
+        let chunk, offset, header2;
         if (length < MAX_PACKET_LENGTH) {
           packet.writeHeader(this.sequenceId);
           if (this.config.debug) {
@@ -18938,9 +18938,9 @@ var require_connection = __commonJS({
           for (offset = 4; offset < 4 + length; offset += MAX_PACKET_LENGTH) {
             chunk = packet.buffer.slice(offset, offset + MAX_PACKET_LENGTH);
             if (chunk.length === MAX_PACKET_LENGTH) {
-              header = Buffer.from([255, 255, 255, this.sequenceId]);
+              header2 = Buffer.from([255, 255, 255, this.sequenceId]);
             } else {
-              header = Buffer.from([
+              header2 = Buffer.from([
                 chunk.length & 255,
                 chunk.length >> 8 & 255,
                 chunk.length >> 16 & 255,
@@ -18948,7 +18948,7 @@ var require_connection = __commonJS({
               ]);
             }
             this._bumpSequenceId(1);
-            this.write(header);
+            this.write(header2);
             this.write(chunk);
           }
         }
@@ -22010,19 +22010,19 @@ var init_dist = __esm({
       }
     };
     responseViaCache = async (res, outgoing) => {
-      let [status, body, header] = res[cacheKey];
+      let [status, body, header2] = res[cacheKey];
       let hasContentLength = false;
-      if (!header) {
-        header = { "content-type": "text/plain; charset=UTF-8" };
-      } else if (header instanceof Headers) {
-        hasContentLength = header.has("content-length");
-        header = buildOutgoingHttpHeaders(header);
-      } else if (Array.isArray(header)) {
-        const headerObj = new Headers(header);
+      if (!header2) {
+        header2 = { "content-type": "text/plain; charset=UTF-8" };
+      } else if (header2 instanceof Headers) {
+        hasContentLength = header2.has("content-length");
+        header2 = buildOutgoingHttpHeaders(header2);
+      } else if (Array.isArray(header2)) {
+        const headerObj = new Headers(header2);
         hasContentLength = headerObj.has("content-length");
-        header = buildOutgoingHttpHeaders(headerObj);
+        header2 = buildOutgoingHttpHeaders(headerObj);
       } else {
-        for (const key in header) {
+        for (const key in header2) {
           if (key.length === 14 && key.toLowerCase() === "content-length") {
             hasContentLength = true;
             break;
@@ -22031,14 +22031,14 @@ var init_dist = __esm({
       }
       if (!hasContentLength) {
         if (typeof body === "string") {
-          header["Content-Length"] = Buffer.byteLength(body);
+          header2["Content-Length"] = Buffer.byteLength(body);
         } else if (body instanceof Uint8Array) {
-          header["Content-Length"] = body.byteLength;
+          header2["Content-Length"] = body.byteLength;
         } else if (body instanceof Blob) {
-          header["Content-Length"] = body.size;
+          header2["Content-Length"] = body.size;
         }
       }
-      outgoing.writeHead(status, header);
+      outgoing.writeHead(status, header2);
       if (typeof body === "string" || body instanceof Uint8Array) {
         outgoing.end(body);
       } else if (body instanceof Blob) {
@@ -30820,10 +30820,10 @@ function isValidJWT(token, algorithm = null) {
     const tokensParts = token.split(".");
     if (tokensParts.length !== 3)
       return false;
-    const [header] = tokensParts;
-    if (!header)
+    const [header2] = tokensParts;
+    if (!header2)
       return false;
-    const parsedHeader = JSON.parse(atob(header));
+    const parsedHeader = JSON.parse(atob(header2));
     if ("typ" in parsedHeader && parsedHeader?.typ !== "JWT")
       return false;
     if (!parsedHeader.alg)
@@ -49026,8 +49026,8 @@ function isDisjoint(...headers) {
     return true;
   }
   let acc;
-  for (const header of sources) {
-    const parameters = Object.keys(header);
+  for (const header2 of sources) {
+    const parameters = Object.keys(header2);
     if (!acc || acc.size === 0) {
       acc = new Set(parameters);
       continue;
@@ -52586,8 +52586,228 @@ async function createContext(opts) {
   return ctx;
 }
 
+// api/seo.ts
+var SITE = "https://apibuy.top";
+var BRAND = "API \u89C2\u5BDF\u8005";
+var SLOGAN = "\u627E API \u4E2D\u8F6C\u7AD9\uFF0C\u5148\u770B API \u89C2\u5BDF\u8005\u3002";
+var BOT_RE = /Baiduspider|Googlebot|bingbot|360Spider|Sogou|YisouSpider|Bytespider|PetalBot|DuckDuckBot|Slurp|facebookexternalhit|Twitterbot|LinkedInBot/i;
+var esc2 = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function htmlPage(p) {
+  const canonical = `${SITE}${p.path}`;
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>${esc2(p.title)}</title>
+<meta name="description" content="${esc2(p.desc)}" />
+${p.keywords ? `<meta name="keywords" content="${esc2(p.keywords)}" />` : ""}
+<link rel="canonical" href="${esc2(canonical)}" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="${BRAND}" />
+<meta property="og:title" content="${esc2(p.title)}" />
+<meta property="og:description" content="${esc2(p.desc)}" />
+<meta property="og:url" content="${esc2(canonical)}" />
+<meta name="robots" content="index,follow" />
+</head>
+<body>
+${p.body}
+<noscript><p>${esc2(SLOGAN)} \u672C\u7AD9\u4E3A\u5355\u9875\u5E94\u7528\uFF0C\u5EFA\u8BAE\u5F00\u542F JavaScript \u83B7\u5F97\u5B8C\u6574\u4F53\u9A8C\u3002</p></noscript>
+</body>
+</html>`;
+}
+function header(path2, h1, sub) {
+  return `<header>
+<h1>${esc2(h1)}</h1>
+<p>${esc2(sub)}</p>
+<nav>
+<a href="${SITE}/">\u9996\u9875</a> \xB7 <a href="${SITE}/pricing">\u4EF7\u683C\u5BF9\u6BD4</a> \xB7 <a href="${SITE}/leaderboard">\u6392\u884C\u699C</a> \xB7 <a href="${SITE}/discover">\u6536\u5F55\u96F7\u8FBE</a> \xB7 <a href="${SITE}/forum">\u89C2\u5BDF\u5BA4</a>
+</nav>
+<link rel="canonical" data-path="${esc2(path2)}" />
+</header><hr/>`;
+}
+function registerSeo(app2) {
+  app2.get("/robots.txt", (c) => {
+    return c.text(
+      `User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /account
+
+Sitemap: ${SITE}/sitemap.xml
+`,
+      200,
+      { "Content-Type": "text/plain; charset=utf-8" }
+    );
+  });
+  let sitemapCache = null;
+  app2.get("/sitemap.xml", async (c) => {
+    if (sitemapCache && Date.now() - sitemapCache.at < 36e5) {
+      return c.text(sitemapCache.xml, 200, { "Content-Type": "application/xml; charset=utf-8" });
+    }
+    const db = getDb();
+    const rows = await db.select({ domain: platforms.domain, updatedAt: platforms.updatedAt }).from(platforms).where(ne(platforms.status, "closed"));
+    const staticPages = [
+      { path: "/", priority: "1.0", changefreq: "daily" },
+      { path: "/pricing", priority: "0.9", changefreq: "hourly" },
+      { path: "/leaderboard", priority: "0.9", changefreq: "hourly" },
+      { path: "/discover", priority: "0.8", changefreq: "hourly" },
+      { path: "/forum", priority: "0.7", changefreq: "hourly" },
+      { path: "/guide", priority: "0.6", changefreq: "weekly" },
+      { path: "/sks", priority: "0.6", changefreq: "weekly" },
+      { path: "/about", priority: "0.5", changefreq: "monthly" },
+      { path: "/advertise", priority: "0.5", changefreq: "monthly" }
+    ];
+    const total = await db.select({ n: sql`count(*)` }).from(platforms).where(ne(platforms.status, "closed"));
+    const totalCount = Number(total[0]?.n ?? 0);
+    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const urls = [];
+    for (const p of staticPages) {
+      urls.push(
+        `<url><loc>${SITE}${esc2(p.path)}</loc><lastmod>${today}</lastmod><changefreq>${p.changefreq}</changefreq><priority>${p.priority}</priority></url>`
+      );
+    }
+    for (const r of rows) {
+      const lm = r.updatedAt ? new Date(r.updatedAt).toISOString().slice(0, 10) : today;
+      urls.push(
+        `<url><loc>${SITE}/site/${encodeURIComponent(r.domain)}</loc><lastmod>${lm}</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url>`
+      );
+    }
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.join("\n")}
+</urlset>`;
+    sitemapCache = { at: Date.now(), xml };
+    return c.text(xml, 200, { "Content-Type": "application/xml; charset=utf-8" });
+  });
+  const isBot = (ua) => BOT_RE.test(ua);
+  app2.get("/", async (c, next) => {
+    if (!isBot(c.req.header("user-agent") ?? "")) return await next();
+    const db = getDb();
+    const top = await db.select({
+      name: platforms.name,
+      domain: platforms.domain,
+      score: platforms.score,
+      status: platforms.status
+    }).from(platforms).where(and(ne(platforms.status, "down"), ne(platforms.status, "closed"))).orderBy(desc(platforms.score)).limit(80);
+    const items = top.map(
+      (p) => `<li><a href="${SITE}/site/${encodeURIComponent(p.domain)}">${esc2(p.name)}</a>\uFF08${esc2(p.domain)}\uFF0C\u8BC4\u5206 ${esc2(Number(p.score).toFixed(1))}\uFF09</li>`
+    ).join("\n");
+    const cnt = await db.select({ n: sql`count(*)` }).from(platforms).where(ne(platforms.status, "closed"));
+    const totalCount = Number(cnt[0]?.n ?? 0);
+    return c.html(
+      htmlPage({
+        title: `${BRAND} - ${SLOGAN}`,
+        desc: `${SLOGAN}${BRAND}\u6301\u7EED\u5B9E\u6D4B ${totalCount} \u5BB6 API \u4E2D\u8F6C\u7AD9\u7684\u7A33\u5B9A\u6027\u3001\u901F\u5EA6\u3001\u4EF7\u683C\u4E0E\u53E3\u7891\uFF0CAI \u6253\u5206\u6A2A\u5411\u5BF9\u6BD4\uFF0C\u5E2E\u4F60\u627E\u5230\u6700\u9760\u8C31\u7684 API \u4E2D\u8F6C\u7AD9\u3002`,
+        keywords: "API\u4E2D\u8F6C\u7AD9,API\u4E2D\u8F6C,API\u8F6C\u53D1,\u4E2D\u8F6C\u7AD9\u8BC4\u6D4B,API\u4E2D\u8F6C\u7AD9\u63A8\u8350,API\u4E2D\u8F6C\u7AD9\u6392\u884C\u699C, Claude API\u4E2D\u8F6C, GPT API\u4E2D\u8F6C",
+        path: "/",
+        body: `${header("/", `${BRAND} - API \u4E2D\u8F6C\u7AD9\u8BC4\u6D4B\u4E0E\u63A8\u8350\u5E73\u53F0`, SLOGAN)}
+<main>
+<p>${esc2(SLOGAN)} \u6211\u4EEC\u6301\u7EED\u89C2\u5BDF\u6BCF\u4E00\u5BB6 API \u4E2D\u8F6C\u7AD9\uFF1A\u54EA\u5BB6\u6700\u8FD1\u6389\u7EBF\u4E86\u3001\u54EA\u5BB6\u6DA8\u4EF7\u4E86\u3001\u54EA\u5BB6\u65B0\u4E0A\u4E86\u529F\u80FD\uFF0C\u4E00\u9879\u4E00\u9879\u5E2E\u4F60\u76EF\u7D27\u3002\u4E0D\u5439\u4E0D\u9ED1\uFF0C\u53EA\u8BF4\u771F\u8BDD\u3002</p>
+<h2>\u4F18\u8D28 API \u4E2D\u8F6C\u7AD9\u63A8\u8350\uFF08AI \u5B9E\u6D4B\u8BC4\u5206\u6392\u5E8F\uFF09</h2>
+<ul>
+${items}
+</ul>
+<p>\u67E5\u770B\u5B8C\u6574\u699C\u5355\u4E0E\u4EF7\u683C\u5BF9\u6BD4\u8BF7\u8BBF\u95EE <a href="${SITE}/leaderboard">${SITE}/leaderboard</a></p>
+</main>`
+      })
+    );
+  });
+  app2.get("/site/:domain", async (c, next) => {
+    if (!isBot(c.req.header("user-agent") ?? "")) return await next();
+    const domain2 = c.req.param("domain");
+    const db = getDb();
+    const [p] = await db.select().from(platforms).where(eq(platforms.domain, domain2)).limit(1);
+    if (!p) return await next();
+    const tags = (p.aiTags ?? []).join("\u3001");
+    const statusText = p.status === "operational" ? "\u8FD0\u884C\u6B63\u5E38" : p.status === "down" ? "\u5F53\u524D\u4E0D\u53EF\u8FBE" : "\u72B6\u6001\u5F85\u786E\u8BA4";
+    const desc2 = `${p.name}\uFF08${p.domain}\uFF09\u662F\u4E00\u5BB6 API \u4E2D\u8F6C\u7AD9\uFF0C\u5F53\u524D\u72B6\u6001\uFF1A${statusText}\uFF0CAI \u7EFC\u5408\u8BC4\u5206 ${Number(p.score).toFixed(1)}\u3002${p.description ? String(p.description).slice(0, 80) : ""} \u5728${BRAND}\u67E5\u770B${p.name}\u7684\u5B9E\u65F6\u4EF7\u683C\u3001\u7A33\u5B9A\u6027\u8BB0\u5F55\u4E0E\u7528\u6237\u8BC4\u4EF7\u3002`;
+    return c.html(
+      htmlPage({
+        title: `${p.name} \u8BC4\u6D4B - \u4EF7\u683C\u3001\u7A33\u5B9A\u6027\u4E0E\u7528\u6237\u53E3\u7891 | ${BRAND}`,
+        desc: desc2,
+        keywords: `${p.name},${p.domain},API\u4E2D\u8F6C\u7AD9,${tags}`,
+        path: `/site/${domain2}`,
+        body: `${header(`/site/${domain2}`, `${p.name}\uFF08${p.domain}\uFF09\u4E2D\u8F6C\u7AD9\u8BC4\u6D4B`, statusText)}
+<main>
+<p>\u5B98\u7F51\uFF1A<a href="${esc2(p.url)}" rel="nofollow">${esc2(p.url)}</a></p>
+<p>AI \u7EFC\u5408\u8BC4\u5206\uFF1A<strong>${esc2(Number(p.score).toFixed(1))}</strong> \uFF5C \u72B6\u6001\uFF1A${esc2(statusText)} \uFF5C \u6536\u5F55\u7F16\u53F7\uFF1A${p.id}</p>
+${p.description ? `<p>${esc2(p.description)}</p>` : ""}
+${tags ? `<p>\u670D\u52A1\u4EAE\u70B9\uFF1A${esc2(tags)}</p>` : ""}
+<p>\u67E5\u770B <a href="${SITE}/site/${encodeURIComponent(domain2)}">\u5B8C\u6574\u4EF7\u683C\u8868\u4E0E\u53EF\u7528\u7387\u66F2\u7EBF</a>\uFF0C\u6216\u4E0E<a href="${SITE}/">\u5176\u4ED6\u4E2D\u8F6C\u7AD9\u6A2A\u5411\u5BF9\u6BD4</a>\u3002</p>
+</main>`
+      })
+    );
+  });
+  const staticSeo = {
+    "/pricing": {
+      title: `API \u4E2D\u8F6C\u7AD9\u4EF7\u683C\u5BF9\u6BD4 - \u5404\u7AD9\u6A21\u578B\u4EF7\u683C\u8868 | ${BRAND}`,
+      desc: `${SLOGAN}\u6309\u6A21\u578B\u5206\u7EC4\u5BF9\u6BD4\u4E0A\u767E\u5BB6 API \u4E2D\u8F6C\u7AD9\u7684\u5B9E\u65F6\u4EF7\u683C\uFF1AClaude\u3001GPT\u3001Gemini\u3001DeepSeek \u7B49\u4E3B\u6D41\u6A21\u578B\u5728\u54EA\u4E2A\u4E2D\u8F6C\u7AD9\u6700\u4FBF\u5B9C\uFF0C\u4EF7\u683C\u53D8\u52A8\u6BCF\u65E5\u8FFD\u8E2A\u3002`,
+      keywords: "API\u4E2D\u8F6C\u7AD9\u4EF7\u683C,\u4E2D\u8F6C\u7AD9\u4EF7\u683C\u5BF9\u6BD4,Claude API\u4EF7\u683C,GPT API\u4EF7\u683C,API\u4E2D\u8F6C\u4F18\u60E0",
+      h1: "API \u4E2D\u8F6C\u7AD9\u4EF7\u683C\u5BF9\u6BD4",
+      sub: "\u6309\u6A21\u578B\u5206\u7EC4\u7684\u5B9E\u65F6\u4EF7\u683C\u8868\uFF0C\u6DA8\u4EF7\u964D\u4EF7\u4E00\u76EE\u4E86\u7136",
+      body: `<p>\u8986\u76D6 Claude\u3001GPT\u3001Gemini\u3001DeepSeek\u3001GLM\u3001Kimi \u7B49\u4E3B\u6D41\u6A21\u578B\u7684\u5206\u7EC4\u4EF7\u683C\uFF0C\u6570\u636E\u6BCF\u65E5\u81EA\u52A8\u91C7\u96C6\u5E76\u6838\u5BF9\u5B98\u7F51\u3002</p><p>\u7B5B\u9009\u4E0E\u6392\u5E8F\u8BF7\u8BBF\u95EE <a href="${SITE}/pricing">\u4EF7\u683C\u5BF9\u6BD4\u9875</a>\u3002</p>`
+    },
+    "/leaderboard": {
+      title: `API \u4E2D\u8F6C\u7AD9\u6392\u884C\u699C - AI \u5B9E\u6D4B\u8BC4\u5206 | ${BRAND}`,
+      desc: `${SLOGAN}\u6392\u884C\u699C\u7531 AI \u63A8\u8350\u5206\u4E0E\u5B9E\u6D4B\u6570\u636E\uFF08\u53EF\u7528\u7387\u3001\u5EF6\u8FDF\u3001\u4EF7\u683C\uFF09\u5171\u540C\u6392\u5E8F\uFF0C\u5E7F\u544A\u4E3B\u4EC5\u5F71\u54CD\u52A0\u6743\u4F4D\uFF0C\u771F\u5B9E\u53EF\u4FE1\u3002`,
+      keywords: "API\u4E2D\u8F6C\u7AD9\u6392\u884C\u699C,\u4E2D\u8F6C\u7AD9\u63A8\u8350,\u4E2D\u8F6C\u7AD9\u6392\u540D",
+      h1: "API \u4E2D\u8F6C\u7AD9\u6392\u884C\u699C",
+      sub: "AI \u63A8\u8350 + \u5B9E\u6D4B\u6570\u636E\u53CC\u903B\u8F91\u6392\u5E8F",
+      body: `<p>\u6309\u6A21\u578B\u67E5\u770B\u5404\u4E2D\u8F6C\u7AD9\u6392\u540D\u3001\u500D\u7387\u4EF7\u3001\u53EF\u7528\u7387\u4E0E\u4EF7\u683C\u8D8B\u52BF\u3002</p>`
+    },
+    "/discover": {
+      title: `\u6536\u5F55\u96F7\u8FBE - \u6700\u65B0\u6536\u5F55 API \u4E2D\u8F6C\u7AD9 | ${BRAND}`,
+      desc: `${SLOGAN}\u6536\u5F55\u96F7\u8FBE\u6301\u7EED\u53D1\u73B0\u5E76\u6838\u9A8C\u65B0\u4E0A\u7EBF\u7684 API \u4E2D\u8F6C\u7AD9\uFF0C\u6BCF\u5BB6\u90FD\u7ECF AI \u5B9E\u6D4B\u540E\u624D\u5C55\u793A\u63A8\u8350\u7406\u7531\u3002`,
+      keywords: "API\u4E2D\u8F6C\u7AD9\u6536\u5F55,\u65B0\u4E2D\u8F6C\u7AD9,\u4E2D\u8F6C\u7AD9\u96F7\u8FBE",
+      h1: "\u6536\u5F55\u96F7\u8FBE",
+      sub: "\u6301\u7EED\u53D1\u73B0\u65B0\u7684 API \u4E2D\u8F6C\u7AD9",
+      body: `<p>\u65B0\u7AD9\u6536\u5F55\u9644 AI \u63A8\u8350\u7406\u7531\u4E0E\u5B9E\u6D4B\u8BB0\u5F55\u3002</p>`
+    },
+    "/forum": {
+      title: `\u89C2\u5BDF\u5BA4 - API \u4E2D\u8F6C\u7AD9\u8BA8\u8BBA\u4E0E\u7206\u6599 | ${BRAND}`,
+      desc: `${SLOGAN}\u89C2\u5BDF\u5BA4\u6C47\u805A\u7528\u6237\u5BF9\u5404\u5BB6 API \u4E2D\u8F6C\u7AD9\u7684\u771F\u5B9E\u53CD\u9988\uFF1A\u8DD1\u8DEF\u9884\u8B66\u3001\u6DA8\u4EF7\u7206\u6599\u3001\u4F7F\u7528\u4F53\u9A8C\u3002`,
+      keywords: "\u4E2D\u8F6C\u7AD9\u8DD1\u8DEF,\u4E2D\u8F6C\u7AD9\u7206\u6599,API\u4E2D\u8F6C\u8BA8\u8BBA",
+      h1: "\u89C2\u5BDF\u5BA4",
+      sub: "\u7528\u6237\u771F\u5B9E\u53CD\u9988\u4E0E\u884C\u4E1A\u52A8\u6001",
+      body: `<p>\u6B22\u8FCE\u5206\u4EAB\u4F60\u5BF9\u5404\u5BB6\u4E2D\u8F6C\u7AD9\u7684\u89C2\u5BDF\u3002</p>`
+    },
+    "/guide": {
+      title: `API \u4E2D\u8F6C\u7AD9\u65B0\u624B\u6307\u5357 | ${BRAND}`,
+      desc: `${SLOGAN}\u4EC0\u4E48\u662F API \u4E2D\u8F6C\u7AD9\u3001\u5982\u4F55\u9009\u62E9\u9760\u8C31\u4E2D\u8F6C\u7AD9\u3001\u500D\u7387\u8BA1\u8D39\u7B49\u57FA\u7840\u77E5\u8BC6\u79D1\u666E\u3002`,
+      keywords: "API\u4E2D\u8F6C\u7AD9\u662F\u4EC0\u4E48,\u4E2D\u8F6C\u7AD9\u6559\u7A0B,\u4E2D\u8F6C\u7AD9\u79D1\u666E",
+      h1: "\u65B0\u624B\u6307\u5357",
+      sub: "API \u4E2D\u8F6C\u7AD9\u57FA\u7840\u77E5\u8BC6",
+      body: `<p>\u4ECE\u5165\u95E8\u5230\u907F\u5751\u7684\u5B8C\u6574\u6307\u5357\u3002</p>`
+    },
+    "/sks": {
+      title: `API \u68C0\u6D4B - \u68C0\u6D4B\u4EFB\u610F\u7AD9\u70B9\u662F\u5426\u4E3A API \u4E2D\u8F6C\u7AD9 | ${BRAND}`,
+      desc: `${SLOGAN}\u8F93\u5165\u4EFB\u610F\u7F51\u5740\uFF0CAI \u81EA\u52A8\u68C0\u6D4B\u8BE5\u7AD9\u70B9\u662F\u5426\u4E3A API \u4E2D\u8F6C\u7AD9\u5E76\u5206\u6790\u5176\u670D\u52A1\u4EAE\u70B9\u4E0E\u4EF7\u683C\u3002`,
+      keywords: "API\u68C0\u6D4B,\u4E2D\u8F6C\u7AD9\u68C0\u6D4B,\u7AD9\u70B9\u8BC6\u522B",
+      h1: "API \u68C0\u6D4B",
+      sub: "AI \u8BC6\u522B\u4EFB\u610F\u7AD9\u70B9\u7684\u4E2D\u8F6C\u7AD9\u5C5E\u6027",
+      body: `<p>\u8F93\u5165\u7F51\u5740\u5373\u53EF\u68C0\u6D4B\u3002</p>`
+    }
+  };
+  for (const [path2, cfg] of Object.entries(staticSeo)) {
+    app2.get(path2, async (c, next) => {
+      if (!isBot(c.req.header("user-agent") ?? "")) return await next();
+      return c.html(
+        htmlPage({
+          title: cfg.title,
+          desc: cfg.desc,
+          keywords: cfg.keywords,
+          path: path2,
+          body: `${header(path2, cfg.h1, cfg.sub)}<main>${cfg.body}</main>`
+        })
+      );
+    });
+  }
+}
+
 // api/boot.ts
 var app = new Hono2();
+registerSeo(app);
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 app.get(Paths.oauthCallback, createOAuthCallbackHandler());
 app.use("/api/trpc/*", async (c) => {
