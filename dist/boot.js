@@ -50466,6 +50466,34 @@ var credInput = external_exports.object({
   username: external_exports.string().min(3, "\u7528\u6237\u540D\u81F3\u5C11 3 \u4E2A\u5B57\u7B26").max(32, "\u7528\u6237\u540D\u6700\u591A 32 \u4E2A\u5B57\u7B26").regex(/^[a-zA-Z0-9_\-一-龥]+$/, "\u7528\u6237\u540D\u53EA\u80FD\u5305\u542B\u4E2D\u82F1\u6587\u3001\u6570\u5B57\u3001\u4E0B\u5212\u7EBF"),
   password: external_exports.string().min(6, "\u5BC6\u7801\u81F3\u5C11 6 \u4F4D").max(64)
 });
+var loginFails = /* @__PURE__ */ new Map();
+var LOGIN_MAX_FAILS = 5;
+var LOGIN_WINDOW_MS = 10 * 60 * 1e3;
+function loginKey(req, username) {
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+  return `${ip}|${username.toLowerCase()}`;
+}
+function assertLoginAllowed(key) {
+  const rec = loginFails.get(key);
+  if (rec && rec.resetAt > Date.now() && rec.count >= LOGIN_MAX_FAILS) {
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: "\u5C1D\u8BD5\u6B21\u6570\u8FC7\u591A\uFF0C\u8BF7 10 \u5206\u949F\u540E\u518D\u8BD5"
+    });
+  }
+}
+function recordLoginFail(key) {
+  const now = Date.now();
+  const rec = loginFails.get(key);
+  if (!rec || rec.resetAt <= now) {
+    loginFails.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+  } else {
+    rec.count += 1;
+  }
+  if (loginFails.size > 5e3) {
+    for (const [k, v] of loginFails) if (v.resetAt <= now) loginFails.delete(k);
+  }
+}
 var accountRouter = createRouter({
   register: publicQuery.input(credInput).mutation(async ({ input, ctx }) => {
     const db = getDb();
@@ -50490,8 +50518,11 @@ var accountRouter = createRouter({
   login: publicQuery.input(credInput).mutation(async ({ input, ctx }) => {
     const db = getDb();
     const unionId = `local_${input.username}`;
+    const key = loginKey(ctx.req, input.username);
+    assertLoginAllowed(key);
     const [user] = await db.select().from(users).where(eq(users.unionId, unionId)).limit(1);
     if (!user || !user.passwordHash || !verifyPassword(input.password, user.passwordHash)) {
+      recordLoginFail(key);
       throw new TRPCError({
         code: "UNAUTHORIZED",
         message: "\u7528\u6237\u540D\u6216\u5BC6\u7801\u9519\u8BEF"
@@ -50500,6 +50531,7 @@ var accountRouter = createRouter({
     if (user.status === "banned") {
       throw new TRPCError({ code: "FORBIDDEN", message: "\u8D26\u53F7\u5DF2\u88AB\u5C01\u7981" });
     }
+    loginFails.delete(key);
     await db.update(users).set({ lastSignInAt: /* @__PURE__ */ new Date() }).where(eq(users.id, user.id));
     const token = await signSessionToken({ unionId, clientId: env.appId });
     setSessionCookie(ctx.resHeaders, ctx.req.headers, token);
@@ -52885,6 +52917,16 @@ app.use("/api/trpc/*", async (c) => {
   });
 });
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
+app.all("/admin", (c) => c.text("Not Found", 404));
+app.all("/admin/*", (c) => c.text("Not Found", 404));
+app.use("/suiyue1987", async (c, next) => {
+  await next();
+  c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
+});
+app.use("/suiyue1987/*", async (c, next) => {
+  await next();
+  c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
+});
 var boot_default = app;
 if (env.isProduction) {
   const { serve: serve2 } = await Promise.resolve().then(() => (init_dist(), dist_exports));

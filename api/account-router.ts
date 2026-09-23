@@ -51,6 +51,43 @@ const credInput = z.object({
   password: z.string().min(6, "密码至少 6 位").max(64),
 });
 
+/** 登录防爆破：同一 IP+用户名 10 分钟内最多失败 5 次（内存计数，进程重启清零） */
+const loginFails = new Map<string, { count: number; resetAt: number }>();
+const LOGIN_MAX_FAILS = 5;
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+
+function loginKey(req: Request, username: string) {
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "unknown";
+  return `${ip}|${username.toLowerCase()}`;
+}
+
+function assertLoginAllowed(key: string) {
+  const rec = loginFails.get(key);
+  if (rec && rec.resetAt > Date.now() && rec.count >= LOGIN_MAX_FAILS) {
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: "尝试次数过多，请 10 分钟后再试",
+    });
+  }
+}
+
+function recordLoginFail(key: string) {
+  const now = Date.now();
+  const rec = loginFails.get(key);
+  if (!rec || rec.resetAt <= now) {
+    loginFails.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+  } else {
+    rec.count += 1;
+  }
+  // 防止 Map 无限增长：顺手清理过期记录
+  if (loginFails.size > 5000) {
+    for (const [k, v] of loginFails) if (v.resetAt <= now) loginFails.delete(k);
+  }
+}
+
 export const accountRouter = createRouter({
   register: publicQuery.input(credInput).mutation(async ({ input, ctx }) => {
     const db = getDb();
@@ -81,6 +118,8 @@ export const accountRouter = createRouter({
   login: publicQuery.input(credInput).mutation(async ({ input, ctx }) => {
     const db = getDb();
     const unionId = `local_${input.username}`;
+    const key = loginKey(ctx.req, input.username);
+    assertLoginAllowed(key);
     const [user] = await db
       .select()
       .from(users)
@@ -91,6 +130,7 @@ export const accountRouter = createRouter({
       !user.passwordHash ||
       !verifyPassword(input.password, user.passwordHash)
     ) {
+      recordLoginFail(key);
       throw new TRPCError({
         code: "UNAUTHORIZED",
         message: "用户名或密码错误",
@@ -99,6 +139,7 @@ export const accountRouter = createRouter({
     if (user.status === "banned") {
       throw new TRPCError({ code: "FORBIDDEN", message: "账号已被封禁" });
     }
+    loginFails.delete(key); // 登录成功清零失败计数
     await db
       .update(users)
       .set({ lastSignInAt: new Date() })
