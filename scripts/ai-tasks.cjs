@@ -193,8 +193,12 @@ async function summarizePlatforms(pool, limit = 150) {
   );
   let done = 0, failed = 0;
   for (const p of plats) {
-    const homepage = await fetchHomepageText(p.url);
-    if (!homepage) { failed++; continue; }
+    // 大多数中转站是 JS 单页应用，首页去标签后无文本——
+    // 不再跳过，改用本站实测数据（供应商/模型数/倍率/价格组）让 AI 总结
+    let homepage = await fetchHomepageText(p.url);
+    if (!homepage) {
+      homepage = "（官网为 JS 单页应用，抓不到静态介绍文本，请仅依据以下本站实测数据总结，不要编造官网信息）";
+    }
     const facts = `站点名：${p.name}\n覆盖供应商数：${p.vendors}\n已采到模型数：${p.models}\n最低计费倍率：${p.minRatio ?? "无数据"}\n价格组数：${p.groups}\n官网首页文本：${homepage}`;
     try {
       const out = await chat(
@@ -357,6 +361,10 @@ async function inferSiteNames(pool, limit = 80) {
 
 /** AI 站点推荐打分：批量评估，写 platforms.score（0-100），排行榜「精选」排序用 */
 async function scorePlatforms(pool, limit = 40) {
+  // M3 推理模型的 <think> 段会吃掉输出额度：40 站一批 4000 token 必截断成非法 JSON，
+  // 缩小批次到 20、放大 max_tokens，保证数组完整返回
+  const BATCH = 20;
+  const MAX_TOKENS = 8000;
   const [plats] = await pool.query(
     `SELECT p.id, p.name, p.apiConfirmed, p.visitCount, p.stage,
        (SELECT COUNT(DISTINCT model) FROM platform_prices WHERE platformId = p.id) AS models,
@@ -367,7 +375,7 @@ async function scorePlatforms(pool, limit = 40) {
      WHERE p.status IN ('operational','slow')
      ORDER BY (p.aiScoredAt IS NULL) DESC, p.aiScoredAt ASC, p.visitCount DESC
      LIMIT ?`,
-    [limit],
+    [Math.min(limit, BATCH)],
   );
   if (plats.length === 0) return { total: 0, done: 0 };
   // 30 天可用率与延迟
@@ -399,7 +407,7 @@ async function scorePlatforms(pool, limit = 40) {
     "你是 API 中转站导航站的推荐算法评审，输出必须是 JSON 数组，不要输出其他内容。",
     `给以下站点打推荐分（0-100 整数）。权重导向：可用率和实测数据最重要，其次价格竞争力与用户口碑，访问量仅作参考；数据不足的站保守给分（40-55），表现全面优秀的站才给 85+。\n` +
       `对每站输出 {"id":数字,"score":数字,"reason":"12字内中文"}。\n站点数据：\n${JSON.stringify(list)}`,
-    4000,
+    MAX_TOKENS,
   );
   const scores = parseJsonArray(out);
   if (!scores) return { total: plats.length, done: 0, parseError: true };
