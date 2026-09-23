@@ -3,6 +3,11 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { platforms, platformPrices, platformDailyStatus, modelProfiles } from "@db/schema";
 import { getDb } from "./queries/connection";
 import { createRouter, publicQuery } from "./middleware";
+import { TtlCache } from "./lib/cache";
+
+// 重查询接口缓存：catalog 10 分钟（价格表日更），榜单类 60 秒
+const catalogCache = new TtlCache(10 * 60 * 1000, 4);
+const boardCache = new TtlCache(60 * 1000, 100);
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -79,6 +84,7 @@ function canonicalModel(raw: string): { label: string; family: string } | null {
 export const pricingRouter = createRouter({
   /** 规范模型目录：canonical 白名单模型，含原始型号变体与真实可用价格组 */
   catalog: publicQuery.query(async () => {
+    return catalogCache.wrap("catalog", async () => {
     const db = getDb();
     const rows = await db
       .selectDistinct({ model: platformPrices.model, groupName: platformPrices.groupName })
@@ -110,6 +116,7 @@ export const pricingRouter = createRouter({
         return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
       })
       .map(([vendor, models]) => ({ vendor, models: models.sort((a, b) => a.label.localeCompare(b.label)) }));
+    });
   }),
 
   /**
@@ -126,6 +133,7 @@ export const pricingRouter = createRouter({
       }),
     )
     .query(async ({ input }) => {
+      return boardCache.wrap(`table:${input.vendor}:${input.model}:${input.sort}`, async () => {
       const db = getDb();
       const distinct = await db.selectDistinct({ model: platformPrices.model }).from(platformPrices);
       const variants = distinct.map((d) => d.model).filter((m) => canonicalModel(m)?.label === input.model);
@@ -216,6 +224,7 @@ export const pricingRouter = createRouter({
           items.sort((a, b) => a.eff - b.eff);
       }
       return { total: items.length, items };
+      });
     }),
 
   /** 站点全部价格 */
@@ -235,6 +244,7 @@ export const pricingRouter = createRouter({
    * 倍率与按次花费不混排：只有同一单位才计算「比次低便宜」
    */
   lowestBoard: publicQuery.query(async () => {
+    return boardCache.wrap("lowestBoard", async () => {
     const db = getDb();
     const all = await db
       .select({
@@ -297,6 +307,7 @@ export const pricingRouter = createRouter({
         };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
+    });
   }),
 
   /**
@@ -306,6 +317,7 @@ export const pricingRouter = createRouter({
   hotModels: publicQuery
     .input(z.object({ limit: z.number().min(1).max(60).default(40) }).optional())
     .query(async ({ input }) => {
+      return boardCache.wrap(`hotModels:${input?.limit ?? 40}`, async () => {
       const db = getDb();
       const rows = await db
         .selectDistinct({ model: platformPrices.model, platformId: platformPrices.platformId })
@@ -330,6 +342,7 @@ export const pricingRouter = createRouter({
         }))
         .sort((a, b) => b.sellers - a.sellers)
         .slice(0, input?.limit ?? 40);
+      });
     }),
 
   /**
@@ -346,6 +359,7 @@ export const pricingRouter = createRouter({
       }),
     )
     .query(async ({ input }) => {
+      return boardCache.wrap(`leaderboard:${input.model}:${input.sort}:${input.onlyConfirmed}`, async () => {
       const db = getDb();
       const distinct = await db.selectDistinct({ model: platformPrices.model }).from(platformPrices);
       const variants = distinct.map((d) => d.model).filter((m) => canonicalModel(m)?.label === input.model);
@@ -487,6 +501,7 @@ export const pricingRouter = createRouter({
         total: items.length,
         items,
       };
+      });
     }),
 
   /**

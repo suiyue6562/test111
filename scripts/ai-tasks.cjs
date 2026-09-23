@@ -11,7 +11,7 @@
 const AI_BASE = (process.env.AI_API_BASE || "https://api.minimaxi.com/v1").replace(/\/+$/, "");
 const AI_KEY = process.env.AI_API_KEY || "";
 const AI_MODEL = process.env.AI_MODEL || "MiniMax-M3";
-const AI_TIMEOUT = 60000;
+const AI_TIMEOUT = 180000; // M3 为推理模型，长输出需更宽超时（原 60s 频繁 abort）
 
 async function chat(system, user, maxTokens = 4000) {
   if (!AI_KEY) throw new Error("AI_API_KEY 未配置");

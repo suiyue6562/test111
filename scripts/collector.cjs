@@ -535,8 +535,9 @@ async function upsertPrices(pool, platformId, items, truncated = false) {
         );
         flagged++;
       } else {
+        // 价格与上轮一致：若此前因突变被标 needReview，持续稳定即视为已确认，自动清除
         await pool.query(
-          "UPDATE platform_prices SET ratio = ?, shortCost = ?, longCost = ?, source = ?, collectedAt = NOW() WHERE id = ?",
+          "UPDATE platform_prices SET ratio = ?, shortCost = ?, longCost = ?, source = ?, collectedAt = NOW(), needReview = 0 WHERE id = ?",
           [it.ratio, it.shortCost, it.longCost, it.source, ex.id],
         );
       }

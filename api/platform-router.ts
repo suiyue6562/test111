@@ -16,6 +16,11 @@ import {
 } from "@db/schema";
 import { getDb } from "./queries/connection";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
+import { TtlCache } from "./lib/cache";
+
+// 首页信息流与站点列表缓存：60 秒（采集器分钟级更新，用户无感知）
+const homeCache = new TtlCache(60 * 1000, 4);
+const listCache = new TtlCache(60 * 1000, 200);
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -174,6 +179,7 @@ function ageDays(p: { createdAt: Date }) {
 export const platformRouter = createRouter({
   /** 首页四层推荐流：广告主 → 优秀站 → 爆款站 → 新站 */
   homeFeed: publicQuery.query(async () => {
+    return homeCache.wrap("homeFeed", async () => {
     const db = getDb();
     const picked = new Set<number>();
     const take = (rows: typeof platforms.$inferSelect[], n: number) => {
@@ -275,6 +281,7 @@ export const platformRouter = createRouter({
       hot: healthy(await withStats(db, hot)),
       newSites: healthy(await withStats(db, newSites)),
     };
+    });
   }),
 
   /** 首页精选：按综合评分排序（仅正常运营且近7天可用率≥50%的站，故障/未确认/关闭一律不上精选） */
@@ -333,6 +340,7 @@ export const platformRouter = createRouter({
       }),
     )
     .query(async ({ input }) => {
+      return listCache.wrap(`list:${JSON.stringify(input)}`, async () => {
       const db = getDb();
       const conds = [];
       if (input.search) {
@@ -412,6 +420,7 @@ export const platformRouter = createRouter({
       const total = result.length;
       const start = (input.page - 1) * input.pageSize;
       return { total, items: result.slice(start, start + input.pageSize) };
+      });
     }),
 
   /** 站点详情（按域名） */

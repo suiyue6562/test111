@@ -50539,7 +50539,46 @@ var accountRouter = createRouter({
   })
 });
 
+// api/lib/cache.ts
+var TtlCache = class {
+  constructor(ttlMs, maxSize = 200) {
+    this.ttlMs = ttlMs;
+    this.maxSize = maxSize;
+  }
+  map = /* @__PURE__ */ new Map();
+  get(key) {
+    const e = this.map.get(key);
+    if (!e) return void 0;
+    if (Date.now() - e.at > this.ttlMs) {
+      this.map.delete(key);
+      return void 0;
+    }
+    return e.value;
+  }
+  set(key, value) {
+    if (this.map.size >= this.maxSize) {
+      const now = Date.now();
+      for (const [k, v] of this.map) if (now - v.at > this.ttlMs) this.map.delete(k);
+      if (this.map.size >= this.maxSize) {
+        const oldest = [...this.map.entries()].sort((a, b) => a[1].at - b[1].at);
+        for (const [k] of oldest.slice(0, Math.ceil(this.maxSize / 4))) this.map.delete(k);
+      }
+    }
+    this.map.set(key, { at: Date.now(), value });
+  }
+  /** 命中则直接返回，否则执行 loader 并写入缓存 */
+  async wrap(key, loader) {
+    const hit = this.get(key);
+    if (hit !== void 0) return hit;
+    const value = await loader();
+    this.set(key, value);
+    return value;
+  }
+};
+
 // api/platform-router.ts
+var homeCache = new TtlCache(60 * 1e3, 4);
+var listCache = new TtlCache(60 * 1e3, 200);
 function pad(n) {
   return String(n).padStart(2, "0");
 }
@@ -50659,64 +50698,66 @@ function ageDays(p) {
 var platformRouter = createRouter({
   /** 首页四层推荐流：广告主 → 优秀站 → 爆款站 → 新站 */
   homeFeed: publicQuery.query(async () => {
-    const db = getDb();
-    const picked = /* @__PURE__ */ new Set();
-    const take = (rows, n) => {
-      const out = [];
-      for (const r of rows) {
-        if (picked.has(r.id)) continue;
-        picked.add(r.id);
-        out.push(r);
-        if (out.length >= n) break;
-      }
-      return out;
-    };
-    const adRows = await db.select().from(platforms).where(
-      and(
-        eq(platforms.isAd, true),
-        sql`${platforms.status} != 'down'`,
-        sql`${platforms.status} != 'unknown'`,
-        or(sql`${platforms.adExpireAt} IS NULL`, sql`${platforms.adExpireAt} > NOW()`)
-      )
-    ).orderBy(desc(platforms.adWeight), desc(platforms.score)).limit(6);
-    const ads = take(adRows, 3);
-    const excellentRows = await db.select().from(platforms).where(and(eq(platforms.status, "operational"), sql`${platforms.stage} != 'closed'`)).orderBy(desc(platforms.score), desc(platforms.visitCount)).limit(12);
-    const excellent = take(excellentRows, 6);
-    const since7 = new Date(Date.now() - 7 * 864e5);
-    const hotIds = await db.select({ platformId: visitLogs.platformId, c: sql`count(*)` }).from(visitLogs).where(sql`${visitLogs.createdAt} >= ${since7}`).groupBy(visitLogs.platformId).orderBy(desc(sql`count(*)`)).limit(12);
-    let hotRows = [];
-    if (hotIds.length > 0) {
-      const rows = await db.select().from(platforms).where(
+    return homeCache.wrap("homeFeed", async () => {
+      const db = getDb();
+      const picked = /* @__PURE__ */ new Set();
+      const take = (rows, n) => {
+        const out = [];
+        for (const r of rows) {
+          if (picked.has(r.id)) continue;
+          picked.add(r.id);
+          out.push(r);
+          if (out.length >= n) break;
+        }
+        return out;
+      };
+      const adRows = await db.select().from(platforms).where(
         and(
-          inArray(platforms.id, hotIds.map((h) => h.platformId)),
+          eq(platforms.isAd, true),
           sql`${platforms.status} != 'down'`,
           sql`${platforms.status} != 'unknown'`,
-          sql`${platforms.stage} != 'closed'`
+          or(sql`${platforms.adExpireAt} IS NULL`, sql`${platforms.adExpireAt} > NOW()`)
         )
-      );
-      const order2 = new Map(hotIds.map((h, i) => [h.platformId, i]));
-      hotRows = rows.sort((a, b) => (order2.get(a.id) ?? 99) - (order2.get(b.id) ?? 99));
-    } else {
-      hotRows = await db.select().from(platforms).where(sql`${platforms.stage} != 'closed' AND ${platforms.status} != 'down' AND ${platforms.status} != 'unknown'`).orderBy(desc(platforms.visitCount)).limit(12);
-    }
-    const hot = take(hotRows, 6);
-    const since30 = new Date(Date.now() - 30 * 864e5);
-    const newRows = await db.select().from(platforms).where(
-      and(
-        sql`${platforms.createdAt} >= ${since30}`,
-        sql`${platforms.stage} != 'closed'`,
-        sql`${platforms.status} != 'down'`,
-        sql`${platforms.status} != 'unknown'`
-      )
-    ).orderBy(desc(platforms.createdAt)).limit(12);
-    const newSites = take(newRows, 6);
-    const healthy = (arr) => arr.filter((r) => r.uptime7 === null || r.uptime7 >= 50);
-    return {
-      ads: await withStats(db, ads),
-      excellent: await withStats(db, excellent),
-      hot: healthy(await withStats(db, hot)),
-      newSites: healthy(await withStats(db, newSites))
-    };
+      ).orderBy(desc(platforms.adWeight), desc(platforms.score)).limit(6);
+      const ads = take(adRows, 3);
+      const excellentRows = await db.select().from(platforms).where(and(eq(platforms.status, "operational"), sql`${platforms.stage} != 'closed'`)).orderBy(desc(platforms.score), desc(platforms.visitCount)).limit(12);
+      const excellent = take(excellentRows, 6);
+      const since7 = new Date(Date.now() - 7 * 864e5);
+      const hotIds = await db.select({ platformId: visitLogs.platformId, c: sql`count(*)` }).from(visitLogs).where(sql`${visitLogs.createdAt} >= ${since7}`).groupBy(visitLogs.platformId).orderBy(desc(sql`count(*)`)).limit(12);
+      let hotRows = [];
+      if (hotIds.length > 0) {
+        const rows = await db.select().from(platforms).where(
+          and(
+            inArray(platforms.id, hotIds.map((h) => h.platformId)),
+            sql`${platforms.status} != 'down'`,
+            sql`${platforms.status} != 'unknown'`,
+            sql`${platforms.stage} != 'closed'`
+          )
+        );
+        const order2 = new Map(hotIds.map((h, i) => [h.platformId, i]));
+        hotRows = rows.sort((a, b) => (order2.get(a.id) ?? 99) - (order2.get(b.id) ?? 99));
+      } else {
+        hotRows = await db.select().from(platforms).where(sql`${platforms.stage} != 'closed' AND ${platforms.status} != 'down' AND ${platforms.status} != 'unknown'`).orderBy(desc(platforms.visitCount)).limit(12);
+      }
+      const hot = take(hotRows, 6);
+      const since30 = new Date(Date.now() - 30 * 864e5);
+      const newRows = await db.select().from(platforms).where(
+        and(
+          sql`${platforms.createdAt} >= ${since30}`,
+          sql`${platforms.stage} != 'closed'`,
+          sql`${platforms.status} != 'down'`,
+          sql`${platforms.status} != 'unknown'`
+        )
+      ).orderBy(desc(platforms.createdAt)).limit(12);
+      const newSites = take(newRows, 6);
+      const healthy = (arr) => arr.filter((r) => r.uptime7 === null || r.uptime7 >= 50);
+      return {
+        ads: await withStats(db, ads),
+        excellent: await withStats(db, excellent),
+        hot: healthy(await withStats(db, hot)),
+        newSites: healthy(await withStats(db, newSites))
+      };
+    });
   }),
   /** 首页精选：按综合评分排序（仅正常运营且近7天可用率≥50%的站，故障/未确认/关闭一律不上精选） */
   featured: publicQuery.query(async () => {
@@ -50759,68 +50800,70 @@ var platformRouter = createRouter({
       pageSize: external_exports.number().int().min(1).max(60).default(24)
     })
   ).query(async ({ input }) => {
-    const db = getDb();
-    const conds = [];
-    if (input.search) {
-      const q = `%${input.search}%`;
-      conds.push(
-        or(
-          like(platforms.name, q),
-          like(platforms.domain, q),
-          like(platforms.description, q)
-        )
-      );
-    }
-    if (input.status?.length)
-      conds.push(
-        inArray(platforms.status, input.status)
-      );
-    if (input.stage?.length)
-      conds.push(
-        inArray(platforms.stage, input.stage)
-      );
-    else
-      conds.push(sql`${platforms.stage} != 'closed'`);
-    let rows = await db.select().from(platforms).where(conds.length ? and(...conds) : void 0);
-    if (input.vendors?.length) {
-      rows = rows.filter(
-        (r) => input.vendors.some((v) => r.vendors.includes(v))
-      );
-    }
-    let result = (await withStats(db, rows)).map((r) => ({
-      ...r,
-      adActive: isAdActive(r)
-    }));
-    switch (input.sort) {
-      case "uptime":
-        result.sort((a, b) => (b.uptime ?? -1) - (a.uptime ?? -1));
-        break;
-      case "latency":
-        result.sort(
-          (a, b) => (a.avgLatency ?? Infinity) - (b.avgLatency ?? Infinity)
+    return listCache.wrap(`list:${JSON.stringify(input)}`, async () => {
+      const db = getDb();
+      const conds = [];
+      if (input.search) {
+        const q = `%${input.search}%`;
+        conds.push(
+          or(
+            like(platforms.name, q),
+            like(platforms.domain, q),
+            like(platforms.description, q)
+          )
         );
-        break;
-      case "visits":
-        result.sort((a, b) => b.visitCount - a.visitCount);
-        break;
-      case "newest":
-        result.sort(
-          (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-        );
-        break;
-      default: {
-        const ads = result.filter((r) => r.adActive).sort((a, b) => b.adWeight - a.adWeight || Number(b.score) - Number(a.score)).slice(0, AD_PIN_LIMIT);
-        const adIds = new Set(ads.map((a) => a.id));
-        const adjScore = (r) => Number(r.score) + (ageDays(r) <= NEW_SITE_DAYS ? NEW_SITE_BOOST : 0);
-        const rest = result.filter((r) => !adIds.has(r.id));
-        const alive = rest.filter((r) => r.status === "operational" || r.status === "slow").sort((a, b) => adjScore(b) - adjScore(a) || b.visitCount - a.visitCount);
-        const sunk = rest.filter((r) => r.status !== "operational" && r.status !== "slow").sort((a, b) => adjScore(b) - adjScore(a));
-        result = [...ads, ...alive, ...sunk];
       }
-    }
-    const total = result.length;
-    const start = (input.page - 1) * input.pageSize;
-    return { total, items: result.slice(start, start + input.pageSize) };
+      if (input.status?.length)
+        conds.push(
+          inArray(platforms.status, input.status)
+        );
+      if (input.stage?.length)
+        conds.push(
+          inArray(platforms.stage, input.stage)
+        );
+      else
+        conds.push(sql`${platforms.stage} != 'closed'`);
+      let rows = await db.select().from(platforms).where(conds.length ? and(...conds) : void 0);
+      if (input.vendors?.length) {
+        rows = rows.filter(
+          (r) => input.vendors.some((v) => r.vendors.includes(v))
+        );
+      }
+      let result = (await withStats(db, rows)).map((r) => ({
+        ...r,
+        adActive: isAdActive(r)
+      }));
+      switch (input.sort) {
+        case "uptime":
+          result.sort((a, b) => (b.uptime ?? -1) - (a.uptime ?? -1));
+          break;
+        case "latency":
+          result.sort(
+            (a, b) => (a.avgLatency ?? Infinity) - (b.avgLatency ?? Infinity)
+          );
+          break;
+        case "visits":
+          result.sort((a, b) => b.visitCount - a.visitCount);
+          break;
+        case "newest":
+          result.sort(
+            (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+          );
+          break;
+        default: {
+          const ads = result.filter((r) => r.adActive).sort((a, b) => b.adWeight - a.adWeight || Number(b.score) - Number(a.score)).slice(0, AD_PIN_LIMIT);
+          const adIds = new Set(ads.map((a) => a.id));
+          const adjScore = (r) => Number(r.score) + (ageDays(r) <= NEW_SITE_DAYS ? NEW_SITE_BOOST : 0);
+          const rest = result.filter((r) => !adIds.has(r.id));
+          const alive = rest.filter((r) => r.status === "operational" || r.status === "slow").sort((a, b) => adjScore(b) - adjScore(a) || b.visitCount - a.visitCount);
+          const sunk = rest.filter((r) => r.status !== "operational" && r.status !== "slow").sort((a, b) => adjScore(b) - adjScore(a));
+          result = [...ads, ...alive, ...sunk];
+        }
+      }
+      const total = result.length;
+      const start = (input.page - 1) * input.pageSize;
+      return { total, items: result.slice(start, start + input.pageSize) };
+    });
   }),
   /** 站点详情（按域名） */
   detail: publicQuery.input(external_exports.object({ domain: external_exports.string() })).query(async ({ input, ctx }) => {
@@ -50985,6 +51028,8 @@ var platformRouter = createRouter({
 });
 
 // api/pricing-router.ts
+var catalogCache = new TtlCache(10 * 60 * 1e3, 4);
+var boardCache = new TtlCache(60 * 1e3, 100);
 function pad2(n) {
   return String(n).padStart(2, "0");
 }
@@ -51052,33 +51097,35 @@ function canonicalModel(raw2) {
 var pricingRouter = createRouter({
   /** 规范模型目录：canonical 白名单模型，含原始型号变体与真实可用价格组 */
   catalog: publicQuery.query(async () => {
-    const db = getDb();
-    const rows = await db.selectDistinct({ model: platformPrices.model, groupName: platformPrices.groupName }).from(platformPrices);
-    const byLabel = /* @__PURE__ */ new Map();
-    for (const r of rows) {
-      const c = canonicalModel(r.model);
-      if (!c) continue;
-      const e = byLabel.get(c.label) ?? { label: c.label, family: c.family, variants: /* @__PURE__ */ new Set(), groups: /* @__PURE__ */ new Set() };
-      e.variants.add(r.model);
-      e.groups.add(r.groupName);
-      byLabel.set(c.label, e);
-    }
-    const families = /* @__PURE__ */ new Map();
-    for (const e of byLabel.values()) {
-      const arr = families.get(e.family) ?? [];
-      arr.push({
-        label: e.label,
-        variants: [...e.variants],
-        groups: [...e.groups].sort((a, b) => a === "default" ? -1 : b === "default" ? 1 : a.localeCompare(b))
-      });
-      families.set(e.family, arr);
-    }
-    const FAMILY_ORDER = ["OpenAI", "Claude", "Gemini", "DeepSeek", "Qwen", "Kimi", "GLM", "xAI", "\u8C46\u5305", "MiniMax", "\u6DF7\u5143"];
-    return [...families.entries()].sort((a, b) => {
-      const ia = FAMILY_ORDER.indexOf(a[0]);
-      const ib = FAMILY_ORDER.indexOf(b[0]);
-      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-    }).map(([vendor, models]) => ({ vendor, models: models.sort((a, b) => a.label.localeCompare(b.label)) }));
+    return catalogCache.wrap("catalog", async () => {
+      const db = getDb();
+      const rows = await db.selectDistinct({ model: platformPrices.model, groupName: platformPrices.groupName }).from(platformPrices);
+      const byLabel = /* @__PURE__ */ new Map();
+      for (const r of rows) {
+        const c = canonicalModel(r.model);
+        if (!c) continue;
+        const e = byLabel.get(c.label) ?? { label: c.label, family: c.family, variants: /* @__PURE__ */ new Set(), groups: /* @__PURE__ */ new Set() };
+        e.variants.add(r.model);
+        e.groups.add(r.groupName);
+        byLabel.set(c.label, e);
+      }
+      const families = /* @__PURE__ */ new Map();
+      for (const e of byLabel.values()) {
+        const arr = families.get(e.family) ?? [];
+        arr.push({
+          label: e.label,
+          variants: [...e.variants],
+          groups: [...e.groups].sort((a, b) => a === "default" ? -1 : b === "default" ? 1 : a.localeCompare(b))
+        });
+        families.set(e.family, arr);
+      }
+      const FAMILY_ORDER = ["OpenAI", "Claude", "Gemini", "DeepSeek", "Qwen", "Kimi", "GLM", "xAI", "\u8C46\u5305", "MiniMax", "\u6DF7\u5143"];
+      return [...families.entries()].sort((a, b) => {
+        const ia = FAMILY_ORDER.indexOf(a[0]);
+        const ib = FAMILY_ORDER.indexOf(b[0]);
+        return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+      }).map(([vendor, models]) => ({ vendor, models: models.sort((a, b) => a.label.localeCompare(b.label)) }));
+    });
   }),
   /**
    * 价格表：canonical 模型（label）→ 全部原始型号变体，按站点聚合。
@@ -51093,82 +51140,84 @@ var pricingRouter = createRouter({
       sort: external_exports.enum(["ratioAsc", "ratioDesc", "latencyAsc", "uptimeDesc"]).default("ratioAsc")
     })
   ).query(async ({ input }) => {
-    const db = getDb();
-    const distinct = await db.selectDistinct({ model: platformPrices.model }).from(platformPrices);
-    const variants = distinct.map((d) => d.model).filter((m) => canonicalModel(m)?.label === input.model);
-    if (variants.length === 0) return { total: 0, items: [] };
-    const prices = await db.select().from(platformPrices).where(inArray(platformPrices.model, variants));
-    if (prices.length === 0) return { total: 0, items: [] };
-    const effOf = (r) => {
-      const ratio = Number(r.ratio);
-      if (ratio > 0) return { e: ratio, isRatio: true };
-      const c = Number(r.shortCost);
-      return c > 0 ? { e: c, isRatio: false } : null;
-    };
-    const rowsByPlat = /* @__PURE__ */ new Map();
-    for (const r of prices) {
-      const arr = rowsByPlat.get(r.platformId) ?? [];
-      arr.push(r);
-      rowsByPlat.set(r.platformId, arr);
-    }
-    const bestByPlat = /* @__PURE__ */ new Map();
-    for (const [pid, rows] of rowsByPlat) {
-      const defaults = rows.filter((r) => r.groupName === "default");
-      const pool2 = defaults.length > 0 ? defaults : rows;
-      let best = null;
-      for (const r of pool2) {
-        const v = effOf(r);
-        if (!v) continue;
-        if (!best || v.e < best.e) best = { row: r, ...v };
-      }
-      if (best) bestByPlat.set(pid, best);
-    }
-    const plats = await db.select().from(platforms).where(inArray(platforms.id, [...bestByPlat.keys()]));
-    const since = /* @__PURE__ */ new Date();
-    since.setDate(since.getDate() - 29);
-    const sinceStr = `${since.getFullYear()}-${pad2(since.getMonth() + 1)}-${pad2(since.getDate())}`;
-    const stats = await db.select().from(platformDailyStatus).where(inArray(platformDailyStatus.platformId, plats.map((p) => p.id)));
-    const items = [...bestByPlat.values()].map(({ row: pr, e, isRatio }) => {
-      const plat = plats.find((p) => p.id === pr.platformId);
-      const days = stats.filter(
-        (s) => s.platformId === pr.platformId && s.date >= sinceStr && s.status !== "nodata"
-      );
-      const ok = days.filter((d) => d.status === "ok").length;
-      const uptime = days.length > 0 ? ok / days.length * 100 : null;
-      const lat = days.filter((d) => d.latencyMs != null);
-      const avgLatency = lat.length > 0 ? Math.round(lat.reduce((a, b) => a + (b.latencyMs ?? 0), 0) / lat.length) : null;
-      return {
-        priceId: pr.id,
-        platformId: pr.platformId,
-        name: plat?.name ?? "\u672A\u77E5",
-        domain: plat?.domain ?? "",
-        url: plat?.url ?? "",
-        variant: pr.model,
-        groupName: pr.groupName,
-        eff: e,
-        isRatio,
-        ratio: pr.ratio,
-        shortCost: pr.shortCost,
-        longCost: pr.longCost,
-        collectedAt: pr.collectedAt,
-        uptime,
-        avgLatency
+    return boardCache.wrap(`table:${input.vendor}:${input.model}:${input.sort}`, async () => {
+      const db = getDb();
+      const distinct = await db.selectDistinct({ model: platformPrices.model }).from(platformPrices);
+      const variants = distinct.map((d) => d.model).filter((m) => canonicalModel(m)?.label === input.model);
+      if (variants.length === 0) return { total: 0, items: [] };
+      const prices = await db.select().from(platformPrices).where(inArray(platformPrices.model, variants));
+      if (prices.length === 0) return { total: 0, items: [] };
+      const effOf = (r) => {
+        const ratio = Number(r.ratio);
+        if (ratio > 0) return { e: ratio, isRatio: true };
+        const c = Number(r.shortCost);
+        return c > 0 ? { e: c, isRatio: false } : null;
       };
+      const rowsByPlat = /* @__PURE__ */ new Map();
+      for (const r of prices) {
+        const arr = rowsByPlat.get(r.platformId) ?? [];
+        arr.push(r);
+        rowsByPlat.set(r.platformId, arr);
+      }
+      const bestByPlat = /* @__PURE__ */ new Map();
+      for (const [pid, rows] of rowsByPlat) {
+        const defaults = rows.filter((r) => r.groupName === "default");
+        const pool2 = defaults.length > 0 ? defaults : rows;
+        let best = null;
+        for (const r of pool2) {
+          const v = effOf(r);
+          if (!v) continue;
+          if (!best || v.e < best.e) best = { row: r, ...v };
+        }
+        if (best) bestByPlat.set(pid, best);
+      }
+      const plats = await db.select().from(platforms).where(inArray(platforms.id, [...bestByPlat.keys()]));
+      const since = /* @__PURE__ */ new Date();
+      since.setDate(since.getDate() - 29);
+      const sinceStr = `${since.getFullYear()}-${pad2(since.getMonth() + 1)}-${pad2(since.getDate())}`;
+      const stats = await db.select().from(platformDailyStatus).where(inArray(platformDailyStatus.platformId, plats.map((p) => p.id)));
+      const items = [...bestByPlat.values()].map(({ row: pr, e, isRatio }) => {
+        const plat = plats.find((p) => p.id === pr.platformId);
+        const days = stats.filter(
+          (s) => s.platformId === pr.platformId && s.date >= sinceStr && s.status !== "nodata"
+        );
+        const ok = days.filter((d) => d.status === "ok").length;
+        const uptime = days.length > 0 ? ok / days.length * 100 : null;
+        const lat = days.filter((d) => d.latencyMs != null);
+        const avgLatency = lat.length > 0 ? Math.round(lat.reduce((a, b) => a + (b.latencyMs ?? 0), 0) / lat.length) : null;
+        return {
+          priceId: pr.id,
+          platformId: pr.platformId,
+          name: plat?.name ?? "\u672A\u77E5",
+          domain: plat?.domain ?? "",
+          url: plat?.url ?? "",
+          variant: pr.model,
+          groupName: pr.groupName,
+          eff: e,
+          isRatio,
+          ratio: pr.ratio,
+          shortCost: pr.shortCost,
+          longCost: pr.longCost,
+          collectedAt: pr.collectedAt,
+          uptime,
+          avgLatency
+        };
+      });
+      switch (input.sort) {
+        case "ratioDesc":
+          items.sort((a, b) => b.eff - a.eff);
+          break;
+        case "latencyAsc":
+          items.sort((a, b) => (a.avgLatency ?? Infinity) - (b.avgLatency ?? Infinity));
+          break;
+        case "uptimeDesc":
+          items.sort((a, b) => (b.uptime ?? -1) - (a.uptime ?? -1));
+          break;
+        default:
+          items.sort((a, b) => a.eff - b.eff);
+      }
+      return { total: items.length, items };
     });
-    switch (input.sort) {
-      case "ratioDesc":
-        items.sort((a, b) => b.eff - a.eff);
-        break;
-      case "latencyAsc":
-        items.sort((a, b) => (a.avgLatency ?? Infinity) - (b.avgLatency ?? Infinity));
-        break;
-      case "uptimeDesc":
-        items.sort((a, b) => (b.uptime ?? -1) - (a.uptime ?? -1));
-        break;
-      default:
-        items.sort((a, b) => a.eff - b.eff);
-    }
-    return { total: items.length, items };
   }),
   /** 站点全部价格 */
   forPlatform: publicQuery.input(external_exports.object({ platformId: external_exports.number() })).query(async ({ input }) => {
@@ -51180,78 +51229,82 @@ var pricingRouter = createRouter({
    * 倍率与按次花费不混排：只有同一单位才计算「比次低便宜」
    */
   lowestBoard: publicQuery.query(async () => {
-    const db = getDb();
-    const all = await db.select({
-      platformId: platformPrices.platformId,
-      model: platformPrices.model,
-      ratio: platformPrices.ratio,
-      shortCost: platformPrices.shortCost
-    }).from(platformPrices);
-    const plats = await db.select({ id: platforms.id, name: platforms.name, domain: platforms.domain, status: platforms.status }).from(platforms).where(inArray(platforms.id, [...new Set(all.map((r) => r.platformId))]));
-    const platOf = new Map(plats.map((p) => [p.id, p]));
-    const byLabel = /* @__PURE__ */ new Map();
-    for (const r of all) {
-      const c = canonicalModel(r.model);
-      if (!c) continue;
-      const plat = platOf.get(r.platformId);
-      if (!plat || plat.status === "down" || plat.stage === "closed") continue;
-      const ratio = Number(r.ratio);
-      const cost = Number(r.shortCost);
-      const v = ratio > 0 ? { e: ratio, isRatio: true } : cost > 0 ? { e: cost, isRatio: false } : null;
-      if (!v) continue;
-      if (v.isRatio && (v.e < 0.1 || v.e > 20)) continue;
-      const e0 = byLabel.get(c.label) ?? { family: c.family, pm: /* @__PURE__ */ new Map() };
-      const cur = e0.pm.get(r.platformId);
-      if (!cur || v.e < cur.e) e0.pm.set(r.platformId, v);
-      byLabel.set(c.label, e0);
-    }
-    const hot = [...byLabel.entries()].map(([label, e0]) => ({ label, family: e0.family, pm: e0.pm, sellers: e0.pm.size })).sort((a, b) => b.sellers - a.sellers).slice(0, 30);
-    return hot.map(({ label, family, pm, sellers }) => {
-      const ratios = [...pm.entries()].filter(([, v]) => v.isRatio).sort((a, b) => a[1].e - b[1].e);
-      const costs = [...pm.entries()].filter(([, v]) => !v.isRatio).sort((a, b) => a[1].e - b[1].e);
-      const pick2 = ratios.length > 0 ? ratios : costs;
-      if (pick2.length === 0) return null;
-      const [minPid, minV] = pick2[0];
-      const minPlat = platOf.get(minPid);
-      if (!minPlat) return null;
-      const second = pick2[1]?.[1];
-      return {
-        vendor: family,
-        model: label,
-        sellers,
-        minEff: minV.e,
-        isRatio: minV.isRatio,
-        minPlatformId: minPlat.id,
-        minPlatformName: minPlat.name,
-        minDomain: minPlat.domain,
-        cheaperThanSecond: second && second.e > 0 ? Math.round((second.e - minV.e) / second.e * 100) : null
-      };
-    }).filter((x) => x !== null);
+    return boardCache.wrap("lowestBoard", async () => {
+      const db = getDb();
+      const all = await db.select({
+        platformId: platformPrices.platformId,
+        model: platformPrices.model,
+        ratio: platformPrices.ratio,
+        shortCost: platformPrices.shortCost
+      }).from(platformPrices);
+      const plats = await db.select({ id: platforms.id, name: platforms.name, domain: platforms.domain, status: platforms.status }).from(platforms).where(inArray(platforms.id, [...new Set(all.map((r) => r.platformId))]));
+      const platOf = new Map(plats.map((p) => [p.id, p]));
+      const byLabel = /* @__PURE__ */ new Map();
+      for (const r of all) {
+        const c = canonicalModel(r.model);
+        if (!c) continue;
+        const plat = platOf.get(r.platformId);
+        if (!plat || plat.status === "down" || plat.stage === "closed") continue;
+        const ratio = Number(r.ratio);
+        const cost = Number(r.shortCost);
+        const v = ratio > 0 ? { e: ratio, isRatio: true } : cost > 0 ? { e: cost, isRatio: false } : null;
+        if (!v) continue;
+        if (v.isRatio && (v.e < 0.1 || v.e > 20)) continue;
+        const e0 = byLabel.get(c.label) ?? { family: c.family, pm: /* @__PURE__ */ new Map() };
+        const cur = e0.pm.get(r.platformId);
+        if (!cur || v.e < cur.e) e0.pm.set(r.platformId, v);
+        byLabel.set(c.label, e0);
+      }
+      const hot = [...byLabel.entries()].map(([label, e0]) => ({ label, family: e0.family, pm: e0.pm, sellers: e0.pm.size })).sort((a, b) => b.sellers - a.sellers).slice(0, 30);
+      return hot.map(({ label, family, pm, sellers }) => {
+        const ratios = [...pm.entries()].filter(([, v]) => v.isRatio).sort((a, b) => a[1].e - b[1].e);
+        const costs = [...pm.entries()].filter(([, v]) => !v.isRatio).sort((a, b) => a[1].e - b[1].e);
+        const pick2 = ratios.length > 0 ? ratios : costs;
+        if (pick2.length === 0) return null;
+        const [minPid, minV] = pick2[0];
+        const minPlat = platOf.get(minPid);
+        if (!minPlat) return null;
+        const second = pick2[1]?.[1];
+        return {
+          vendor: family,
+          model: label,
+          sellers,
+          minEff: minV.e,
+          isRatio: minV.isRatio,
+          minPlatformId: minPlat.id,
+          minPlatformName: minPlat.name,
+          minDomain: minPlat.domain,
+          cheaperThanSecond: second && second.e > 0 ? Math.round((second.e - minV.e) / second.e * 100) : null
+        };
+      }).filter((x) => x !== null);
+    });
   }),
   /**
    * 热门模型 tab 列表：canonical 模型按在售站数排序，附 AI 档案（blurb/tags）
    * 排行榜页顶部模型切换用
    */
   hotModels: publicQuery.input(external_exports.object({ limit: external_exports.number().min(1).max(60).default(40) }).optional()).query(async ({ input }) => {
-    const db = getDb();
-    const rows = await db.selectDistinct({ model: platformPrices.model, platformId: platformPrices.platformId }).from(platformPrices);
-    const byLabel = /* @__PURE__ */ new Map();
-    for (const r of rows) {
-      const c = canonicalModel(r.model);
-      if (!c) continue;
-      const e = byLabel.get(c.label) ?? { label: c.label, family: c.family, sellers: /* @__PURE__ */ new Set() };
-      e.sellers.add(r.platformId);
-      byLabel.set(c.label, e);
-    }
-    const profiles = await db.select().from(modelProfiles);
-    const profOf = new Map(profiles.map((p) => [p.label, p]));
-    return [...byLabel.values()].map((e) => ({
-      label: e.label,
-      family: e.family,
-      sellers: e.sellers.size,
-      blurb: profOf.get(e.label)?.blurb ?? null,
-      tags: profOf.get(e.label)?.tags ?? []
-    })).sort((a, b) => b.sellers - a.sellers).slice(0, input?.limit ?? 40);
+    return boardCache.wrap(`hotModels:${input?.limit ?? 40}`, async () => {
+      const db = getDb();
+      const rows = await db.selectDistinct({ model: platformPrices.model, platformId: platformPrices.platformId }).from(platformPrices);
+      const byLabel = /* @__PURE__ */ new Map();
+      for (const r of rows) {
+        const c = canonicalModel(r.model);
+        if (!c) continue;
+        const e = byLabel.get(c.label) ?? { label: c.label, family: c.family, sellers: /* @__PURE__ */ new Set() };
+        e.sellers.add(r.platformId);
+        byLabel.set(c.label, e);
+      }
+      const profiles = await db.select().from(modelProfiles);
+      const profOf = new Map(profiles.map((p) => [p.label, p]));
+      return [...byLabel.values()].map((e) => ({
+        label: e.label,
+        family: e.family,
+        sellers: e.sellers.size,
+        blurb: profOf.get(e.label)?.blurb ?? null,
+        tags: profOf.get(e.label)?.tags ?? []
+      })).sort((a, b) => b.sellers - a.sellers).slice(0, input?.limit ?? 40);
+    });
   }),
   /**
    * 模型排行榜：AI 推荐分 + 广告主投放双重排序。
@@ -51267,123 +51320,125 @@ var pricingRouter = createRouter({
       // 仅已实测
     })
   ).query(async ({ input }) => {
-    const db = getDb();
-    const distinct = await db.selectDistinct({ model: platformPrices.model }).from(platformPrices);
-    const variants = distinct.map((d) => d.model).filter((m) => canonicalModel(m)?.label === input.model);
-    if (variants.length === 0) return { profile: null, stats: null, total: 0, items: [] };
-    const prices = await db.select().from(platformPrices).where(inArray(platformPrices.model, variants));
-    if (prices.length === 0) return { profile: null, stats: null, total: 0, items: [] };
-    const effOf = (r) => {
-      const ratio = Number(r.ratio);
-      if (ratio > 0) return { e: ratio, isRatio: true };
-      const c = Number(r.shortCost);
-      return c > 0 ? { e: c, isRatio: false } : null;
-    };
-    const RATIO_FLOOR = 0.1;
-    const RATIO_CEIL = 20;
-    const plausible = (r) => {
-      const v = effOf(r);
-      if (!v) return null;
-      if (!v.isRatio) return v;
-      return v.e >= RATIO_FLOOR && v.e <= RATIO_CEIL ? v : null;
-    };
-    const rowsByPlat = /* @__PURE__ */ new Map();
-    for (const r of prices) {
-      const arr = rowsByPlat.get(r.platformId) ?? [];
-      arr.push(r);
-      rowsByPlat.set(r.platformId, arr);
-    }
-    const bestByPlat = /* @__PURE__ */ new Map();
-    for (const [pid, rows] of rowsByPlat) {
-      const valids = [];
-      for (const r of rows) {
-        const v = plausible(r);
-        if (v) valids.push({ row: r, ...v });
+    return boardCache.wrap(`leaderboard:${input.model}:${input.sort}:${input.onlyConfirmed}`, async () => {
+      const db = getDb();
+      const distinct = await db.selectDistinct({ model: platformPrices.model }).from(platformPrices);
+      const variants = distinct.map((d) => d.model).filter((m) => canonicalModel(m)?.label === input.model);
+      if (variants.length === 0) return { profile: null, stats: null, total: 0, items: [] };
+      const prices = await db.select().from(platformPrices).where(inArray(platformPrices.model, variants));
+      if (prices.length === 0) return { profile: null, stats: null, total: 0, items: [] };
+      const effOf = (r) => {
+        const ratio = Number(r.ratio);
+        if (ratio > 0) return { e: ratio, isRatio: true };
+        const c = Number(r.shortCost);
+        return c > 0 ? { e: c, isRatio: false } : null;
+      };
+      const RATIO_FLOOR = 0.1;
+      const RATIO_CEIL = 20;
+      const plausible = (r) => {
+        const v = effOf(r);
+        if (!v) return null;
+        if (!v.isRatio) return v;
+        return v.e >= RATIO_FLOOR && v.e <= RATIO_CEIL ? v : null;
+      };
+      const rowsByPlat = /* @__PURE__ */ new Map();
+      for (const r of prices) {
+        const arr = rowsByPlat.get(r.platformId) ?? [];
+        arr.push(r);
+        rowsByPlat.set(r.platformId, arr);
       }
-      if (valids.length === 0) continue;
-      const defaults = valids.filter((x) => x.row.groupName === "default");
-      const pool2 = defaults.length > 0 ? defaults : valids;
-      let best = pool2[0];
-      for (const x of pool2) if (x.e < best.e) best = x;
-      bestByPlat.set(pid, best);
-    }
-    const plats = await db.select().from(platforms).where(inArray(platforms.id, [...bestByPlat.keys()]));
-    const platOf = new Map(plats.map((p) => [p.id, p]));
-    const since = /* @__PURE__ */ new Date();
-    since.setDate(since.getDate() - 29);
-    const sinceStr = `${since.getFullYear()}-${pad2(since.getMonth() + 1)}-${pad2(since.getDate())}`;
-    const trendSince = /* @__PURE__ */ new Date();
-    trendSince.setDate(trendSince.getDate() - 30);
-    const stats = await db.select().from(platformDailyStatus).where(inArray(platformDailyStatus.platformId, plats.map((p) => p.id)));
-    let items = [...bestByPlat.values()].flatMap(({ row: pr, e, isRatio }) => {
-      const plat = platOf.get(pr.platformId);
-      if (!plat || plat.status === "down" || plat.stage === "closed") return [];
-      if (input.onlyConfirmed && !plat.apiConfirmed) return [];
-      const days = stats.filter(
-        (s) => s.platformId === pr.platformId && s.date >= sinceStr && s.status !== "nodata"
-      );
-      const ok = days.filter((d) => d.status === "ok").length;
-      const uptime = days.length > 0 ? ok / days.length * 100 : null;
-      const lat = days.filter((d) => d.latencyMs != null);
-      const avgLatency = lat.length > 0 ? Math.round(lat.reduce((a, b) => a + (b.latencyMs ?? 0), 0) / lat.length) : null;
-      let priceTrend = null;
-      const ratio = Number(pr.ratio);
-      const prev = pr.prevRatio != null ? Number(pr.prevRatio) : null;
-      if (pr.ratioChangedAt && pr.ratioChangedAt >= trendSince && prev && prev > 0 && ratio > 0) {
-        priceTrend = Math.round((ratio - prev) / prev * 100);
+      const bestByPlat = /* @__PURE__ */ new Map();
+      for (const [pid, rows] of rowsByPlat) {
+        const valids = [];
+        for (const r of rows) {
+          const v = plausible(r);
+          if (v) valids.push({ row: r, ...v });
+        }
+        if (valids.length === 0) continue;
+        const defaults = valids.filter((x) => x.row.groupName === "default");
+        const pool2 = defaults.length > 0 ? defaults : valids;
+        let best = pool2[0];
+        for (const x of pool2) if (x.e < best.e) best = x;
+        bestByPlat.set(pid, best);
       }
-      const adActive = plat.isAd && (!plat.adExpireAt || plat.adExpireAt > /* @__PURE__ */ new Date());
-      return [{
-        platformId: plat.id,
-        name: plat.name,
-        domain: plat.domain,
-        url: plat.url,
-        aiTags: plat.aiTags ?? [],
-        variant: pr.model,
-        groupName: pr.groupName,
-        eff: e,
-        isRatio,
-        collectedAt: pr.collectedAt,
-        priceTrend,
-        uptime,
-        avgLatency,
-        score: Number(plat.score),
-        apiConfirmed: plat.apiConfirmed,
-        adActive,
-        adWeight: plat.adWeight
-      }];
+      const plats = await db.select().from(platforms).where(inArray(platforms.id, [...bestByPlat.keys()]));
+      const platOf = new Map(plats.map((p) => [p.id, p]));
+      const since = /* @__PURE__ */ new Date();
+      since.setDate(since.getDate() - 29);
+      const sinceStr = `${since.getFullYear()}-${pad2(since.getMonth() + 1)}-${pad2(since.getDate())}`;
+      const trendSince = /* @__PURE__ */ new Date();
+      trendSince.setDate(trendSince.getDate() - 30);
+      const stats = await db.select().from(platformDailyStatus).where(inArray(platformDailyStatus.platformId, plats.map((p) => p.id)));
+      let items = [...bestByPlat.values()].flatMap(({ row: pr, e, isRatio }) => {
+        const plat = platOf.get(pr.platformId);
+        if (!plat || plat.status === "down" || plat.stage === "closed") return [];
+        if (input.onlyConfirmed && !plat.apiConfirmed) return [];
+        const days = stats.filter(
+          (s) => s.platformId === pr.platformId && s.date >= sinceStr && s.status !== "nodata"
+        );
+        const ok = days.filter((d) => d.status === "ok").length;
+        const uptime = days.length > 0 ? ok / days.length * 100 : null;
+        const lat = days.filter((d) => d.latencyMs != null);
+        const avgLatency = lat.length > 0 ? Math.round(lat.reduce((a, b) => a + (b.latencyMs ?? 0), 0) / lat.length) : null;
+        let priceTrend = null;
+        const ratio = Number(pr.ratio);
+        const prev = pr.prevRatio != null ? Number(pr.prevRatio) : null;
+        if (pr.ratioChangedAt && pr.ratioChangedAt >= trendSince && prev && prev > 0 && ratio > 0) {
+          priceTrend = Math.round((ratio - prev) / prev * 100);
+        }
+        const adActive = plat.isAd && (!plat.adExpireAt || plat.adExpireAt > /* @__PURE__ */ new Date());
+        return [{
+          platformId: plat.id,
+          name: plat.name,
+          domain: plat.domain,
+          url: plat.url,
+          aiTags: plat.aiTags ?? [],
+          variant: pr.model,
+          groupName: pr.groupName,
+          eff: e,
+          isRatio,
+          collectedAt: pr.collectedAt,
+          priceTrend,
+          uptime,
+          avgLatency,
+          score: Number(plat.score),
+          apiConfirmed: plat.apiConfirmed,
+          adActive,
+          adWeight: plat.adWeight
+        }];
+      });
+      switch (input.sort) {
+        case "ratioAsc":
+          items.sort((a, b) => a.eff - b.eff);
+          break;
+        case "uptimeDesc":
+          items.sort((a, b) => (b.uptime ?? -1) - (a.uptime ?? -1));
+          break;
+        case "latencyAsc":
+          items.sort((a, b) => (a.avgLatency ?? Infinity) - (b.avgLatency ?? Infinity));
+          break;
+        default: {
+          const ads = items.filter((x) => x.adActive).sort((a, b) => b.adWeight - a.adWeight).slice(0, 3);
+          const rest = items.filter((x) => !ads.includes(x)).sort((a, b) => b.score - a.score);
+          items = [...ads, ...rest];
+        }
+      }
+      const profiles = await db.select().from(modelProfiles);
+      const profile = profiles.find((p) => p.label === input.model) ?? null;
+      const uptimes = items.map((x) => x.uptime).filter((x) => x != null);
+      const ratioEffs = items.filter((x) => x.isRatio).map((x) => x.eff);
+      return {
+        profile: profile ? { blurb: profile.blurb, tags: profile.tags ?? [], family: profile.family } : null,
+        stats: {
+          sellers: items.length,
+          avgUptime: uptimes.length > 0 ? Math.round(uptimes.reduce((a, b) => a + b, 0) / uptimes.length) : null,
+          minEff: ratioEffs.length > 0 ? Math.min(...ratioEffs) : null,
+          maxEff: ratioEffs.length > 0 ? Math.max(...ratioEffs) : null
+        },
+        total: items.length,
+        items
+      };
     });
-    switch (input.sort) {
-      case "ratioAsc":
-        items.sort((a, b) => a.eff - b.eff);
-        break;
-      case "uptimeDesc":
-        items.sort((a, b) => (b.uptime ?? -1) - (a.uptime ?? -1));
-        break;
-      case "latencyAsc":
-        items.sort((a, b) => (a.avgLatency ?? Infinity) - (b.avgLatency ?? Infinity));
-        break;
-      default: {
-        const ads = items.filter((x) => x.adActive).sort((a, b) => b.adWeight - a.adWeight).slice(0, 3);
-        const rest = items.filter((x) => !ads.includes(x)).sort((a, b) => b.score - a.score);
-        items = [...ads, ...rest];
-      }
-    }
-    const profiles = await db.select().from(modelProfiles);
-    const profile = profiles.find((p) => p.label === input.model) ?? null;
-    const uptimes = items.map((x) => x.uptime).filter((x) => x != null);
-    const ratioEffs = items.filter((x) => x.isRatio).map((x) => x.eff);
-    return {
-      profile: profile ? { blurb: profile.blurb, tags: profile.tags ?? [], family: profile.family } : null,
-      stats: {
-        sellers: items.length,
-        avgUptime: uptimes.length > 0 ? Math.round(uptimes.reduce((a, b) => a + b, 0) / uptimes.length) : null,
-        minEff: ratioEffs.length > 0 ? Math.min(...ratioEffs) : null,
-        maxEff: ratioEffs.length > 0 ? Math.max(...ratioEffs) : null
-      },
-      total: items.length,
-      items
-    };
   }),
   /**
    * 同站比价：该站每个模型在全网的价格排名
