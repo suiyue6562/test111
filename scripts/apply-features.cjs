@@ -28,6 +28,8 @@ async function main() {
     ["apiConfirmed", "ALTER TABLE platforms ADD COLUMN apiConfirmed TINYINT(1) NOT NULL DEFAULT 0 AFTER autoClosed"],
     ["lastProbeAt", "ALTER TABLE platforms ADD COLUMN lastProbeAt TIMESTAMP NULL DEFAULT NULL AFTER apiConfirmed"],
     ["lastProbeLatency", "ALTER TABLE platforms ADD COLUMN lastProbeLatency INT NULL DEFAULT NULL AFTER lastProbeAt"],
+    ["priceFailCount", "ALTER TABLE platforms ADD COLUMN priceFailCount INT NOT NULL DEFAULT 0 AFTER lastProbeLatency"],
+    ["priceStale", "ALTER TABLE platforms ADD COLUMN priceStale TINYINT(1) NOT NULL DEFAULT 0 AFTER priceFailCount"],
   ];
   for (const [col, sql] of adds) {
     if (await columnExists(conn, "platforms", col)) {
@@ -101,3 +103,4 @@ main().catch((e) => {
   console.error("[migrate] failed:", e.message);
   process.exit(1);
 });
+

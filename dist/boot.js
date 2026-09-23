@@ -48088,6 +48088,9 @@ var platforms = mysqlTable(
     apiConfirmed: boolean4("apiConfirmed").default(false).notNull(),
     lastProbeAt: timestamp("lastProbeAt"),
     lastProbeLatency: int2("lastProbeLatency"),
+    // 价格采集健康度：连续失败次数与"价格待核实"标记（>=3 次失败置 1，成功后清零）
+    priceFailCount: int2("priceFailCount").default(0).notNull(),
+    priceStale: boolean4("priceStale").default(false).notNull(),
     ownerId: bigint4("ownerId", { mode: "number", unsigned: true }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().notNull().$onUpdate(() => /* @__PURE__ */ new Date())
@@ -50639,6 +50642,7 @@ var platformRouter = createRouter({
       and(
         eq(platforms.isAd, true),
         sql`${platforms.status} != 'down'`,
+        sql`${platforms.status} != 'unknown'`,
         or(sql`${platforms.adExpireAt} IS NULL`, sql`${platforms.adExpireAt} > NOW()`)
       )
     ).orderBy(desc(platforms.adWeight), desc(platforms.score)).limit(6);
@@ -50653,13 +50657,14 @@ var platformRouter = createRouter({
         and(
           inArray(platforms.id, hotIds.map((h) => h.platformId)),
           sql`${platforms.status} != 'down'`,
+          sql`${platforms.status} != 'unknown'`,
           sql`${platforms.stage} != 'closed'`
         )
       );
       const order2 = new Map(hotIds.map((h, i) => [h.platformId, i]));
       hotRows = rows.sort((a, b) => (order2.get(a.id) ?? 99) - (order2.get(b.id) ?? 99));
     } else {
-      hotRows = await db.select().from(platforms).where(sql`${platforms.stage} != 'closed' AND ${platforms.status} != 'down'`).orderBy(desc(platforms.visitCount)).limit(12);
+      hotRows = await db.select().from(platforms).where(sql`${platforms.stage} != 'closed' AND ${platforms.status} != 'down' AND ${platforms.status} != 'unknown'`).orderBy(desc(platforms.visitCount)).limit(12);
     }
     const hot = take(hotRows, 6);
     const since30 = new Date(Date.now() - 30 * 864e5);
@@ -50667,7 +50672,8 @@ var platformRouter = createRouter({
       and(
         sql`${platforms.createdAt} >= ${since30}`,
         sql`${platforms.stage} != 'closed'`,
-        sql`${platforms.status} != 'down'`
+        sql`${platforms.status} != 'down'`,
+        sql`${platforms.status} != 'unknown'`
       )
     ).orderBy(desc(platforms.createdAt)).limit(12);
     const newSites = take(newRows, 6);
@@ -50679,18 +50685,27 @@ var platformRouter = createRouter({
       newSites: healthy(await withStats(db, newSites))
     };
   }),
-  /** 首页精选：按综合评分排序 */
+  /** 首页精选：按综合评分排序（仅正常运营且近7天可用率≥50%的站，故障/未确认/关闭一律不上精选） */
   featured: publicQuery.query(async () => {
     const db = getDb();
-    const rows = await db.select().from(platforms).where(eq(platforms.featured, true)).orderBy(desc(platforms.score), desc(platforms.visitCount)).limit(18);
-    return withStats(db, rows);
+    const rows = await db.select().from(platforms).where(
+      and(
+        eq(platforms.featured, true),
+        eq(platforms.status, "operational"),
+        sql`${platforms.stage} != 'closed'`
+      )
+    ).orderBy(desc(platforms.score), desc(platforms.visitCount)).limit(18);
+    const healthy = (arr) => arr.filter((r) => r.uptime7 === null || r.uptime7 >= 50);
+    return healthy(await withStats(db, rows));
   }),
-  /** 首页赞助广告位：未过期的广告按权重排序 */
+  /** 首页赞助广告位：未过期广告按权重排序（故障站不展示——保护用户也保护广告主预算） */
   adSlots: publicQuery.query(async () => {
     const db = getDb();
     const rows = await db.select().from(platforms).where(
       and(
         eq(platforms.isAd, true),
+        sql`${platforms.status} != 'down'`,
+        sql`${platforms.stage} != 'closed'`,
         or(
           sql`${platforms.adExpireAt} IS NULL`,
           sql`${platforms.adExpireAt} > NOW()`
@@ -50765,9 +50780,9 @@ var platformRouter = createRouter({
         const adIds = new Set(ads.map((a) => a.id));
         const adjScore = (r) => Number(r.score) + (ageDays(r) <= NEW_SITE_DAYS ? NEW_SITE_BOOST : 0);
         const rest = result.filter((r) => !adIds.has(r.id));
-        const alive = rest.filter((r) => r.status !== "down").sort((a, b) => adjScore(b) - adjScore(a) || b.visitCount - a.visitCount);
-        const down = rest.filter((r) => r.status === "down").sort((a, b) => adjScore(b) - adjScore(a));
-        result = [...ads, ...alive, ...down];
+        const alive = rest.filter((r) => r.status === "operational" || r.status === "slow").sort((a, b) => adjScore(b) - adjScore(a) || b.visitCount - a.visitCount);
+        const sunk = rest.filter((r) => r.status !== "operational" && r.status !== "slow").sort((a, b) => adjScore(b) - adjScore(a));
+        result = [...ads, ...alive, ...sunk];
       }
     }
     const total = result.length;

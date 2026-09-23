@@ -69,6 +69,9 @@ export const platforms = mysqlTable(
     apiConfirmed: boolean("apiConfirmed").default(false).notNull(),
     lastProbeAt: timestamp("lastProbeAt"),
     lastProbeLatency: int("lastProbeLatency"),
+    // 价格采集健康度：连续失败次数与"价格待核实"标记（>=3 次失败置 1，成功后清零）
+    priceFailCount: int("priceFailCount").default(0).notNull(),
+    priceStale: boolean("priceStale").default(false).notNull(),
     ownerId: bigint("ownerId", { mode: "number", unsigned: true }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt")
@@ -400,3 +403,4 @@ export type AdInquiry = typeof adInquiries.$inferSelect;
 
 export type InsertPlatformPrice = typeof platformPrices.$inferInsert;
 export type InsertSkrCode = typeof skrCodes.$inferInsert;
+

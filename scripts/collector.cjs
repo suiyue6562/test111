@@ -392,7 +392,7 @@ function estimateCosts(modelRatio, completionRatio, groupRatio) {
 async function fetchPlatformPrices(platform) {
   const root = (platform.url || "").replace(/\/+$/, "");
   if (!root) return null;
-  const MAX_ITEMS = 10000; // 单站价格记录上限（模型×组）；超出时 default 组优先保留
+  const MAX_ITEMS = 20000; // 单站价格记录上限（模型×组）；超出时 default 组优先保留
   const HARD_CAP = 30000; // 防御性硬上限，避免异常站撑爆内存
 
   /** 截断时 default 组优先保留，并标记 truncated（截断后禁止失效清理，防止误删） */
@@ -557,13 +557,29 @@ async function collectAllPrices(pool) {
     [plats.length],
   );
   const runId = runRes.insertId;
-  let ok = 0, totalItems = 0, insertedTotal = 0, updatedTotal = 0, flaggedTotal = 0, removedTotal = 0;
+  let ok = 0, totalItems = 0, insertedTotal = 0, updatedTotal = 0, flaggedTotal = 0, removedTotal = 0, staleTotal = 0;
   const CHUNK = 10;
   for (let i = 0; i < plats.length; i += CHUNK) {
     await Promise.allSettled(
       plats.slice(i, i + CHUNK).map(async (p) => {
         const res = await fetchPlatformPrices(p);
-        if (!res) return;
+        if (!res) {
+          // 采集失败：累计失败次数，连续 >=3 次打"价格待核实"标记（前端提示数据可能过期）
+          const [u] = await pool.query(
+            "UPDATE platforms SET priceFailCount = priceFailCount + 1, priceStale = IF(priceFailCount + 1 >= 3, 1, priceStale) WHERE id = ?",
+            [p.id],
+          );
+          if (u.affectedRows > 0) {
+            const [r2] = await pool.query("SELECT priceFailCount, priceStale FROM platforms WHERE id = ?", [p.id]);
+            if (r2.length > 0 && Number(r2[0].priceStale) === 1 && Number(r2[0].priceFailCount) === 3) {
+              staleTotal++;
+              console.log(`[pricing] ${p.name}: 连续 ${r2[0].priceFailCount} 次采集失败，标记价格待核实`);
+            }
+          }
+          return;
+        }
+        // 采集成功：清零失败计数并解除待核实标记
+        await pool.query("UPDATE platforms SET priceFailCount = 0, priceStale = 0 WHERE id = ? AND (priceFailCount > 0 OR priceStale = 1)", [p.id]);
         const { items, truncated } = res;
         const { inserted, updated, flagged, removed } = await upsertPrices(pool, p.id, items, truncated);
         ok++;
@@ -582,7 +598,7 @@ async function collectAllPrices(pool) {
     [
       ok,
       plats.length - ok,
-      `站点:${ok}/${plats.length} 价格:${totalItems} 新增:${insertedTotal} 更新:${updatedTotal} 突变待复核:${flaggedTotal} 失效清理:${removedTotal}`,
+      `站点:${ok}/${plats.length} 价格:${totalItems} 新增:${insertedTotal} 更新:${updatedTotal} 突变待复核:${flaggedTotal} 失效清理:${removedTotal} 新标记待核实:${staleTotal}`,
       runId,
     ],
   );

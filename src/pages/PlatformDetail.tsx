@@ -252,6 +252,11 @@ export default function PlatformDetail() {
       {priceGroups.length > 0 && (
         <div className="rounded-xl border bg-card p-5">
           <h2 className="font-semibold mb-1">模型报价</h2>
+          {p.priceStale && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+              ⚠️ 该站价格连续多次采集失败，以下数据可能已过期，请以官网实时价格为准。
+            </div>
+          )}
           <p className="text-xs text-muted-foreground mb-3">
             按供应商分组，点击组名折叠/展开；倍率为相对官方价格的人民币倍率，花费为估算单次调用成本；
             同一模型不同价格组（价格组列）价格不同。
@@ -429,3 +434,4 @@ export default function PlatformDetail() {
     </div>
   );
 }
+

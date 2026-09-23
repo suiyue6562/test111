@@ -118,7 +118,7 @@ async function reviewPriceMutations(pool) {
   const [rows] = await pool.query(
     `SELECT pp.id, p.name AS platform, pp.model, pp.groupName, pp.prevRatio, pp.ratio, pp.shortCost
      FROM platform_prices pp JOIN platforms p ON p.id = pp.platformId
-     WHERE pp.needReview = 1 ORDER BY pp.ratioChangedAt ASC LIMIT 60`,
+     WHERE pp.needReview = 1 ORDER BY pp.ratioChangedAt ASC LIMIT 200`,
   );
   if (rows.length === 0) return { reviewed: 0, autoOk: 0, suspect: 0, skipped: true };
 
@@ -382,3 +382,4 @@ async function runAiTasks(pool) {
 }
 
 module.exports = { runAiTasks };
+
